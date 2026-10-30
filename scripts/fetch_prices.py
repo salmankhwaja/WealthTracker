@@ -30,6 +30,20 @@ TROY_OZ_G = 31.1034768
 TOLA_G = 11.664
 
 MUFAP_URL = "https://www.mufap.com.pk/Industry/IndustryStatDaily?tab=3"
+MUFAP_URLS = [
+    MUFAP_URL,
+    "https://mufap.com.pk/Industry/IndustryStatDaily?tab=3",
+    "https://beta.mufap.com.pk/Industry/IndustryStatDaily?tab=3",
+    "https://mail.mufap.com.pk/Industry/IndustryStatDaily?tab=3",
+]
+BROWSER_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Site": "none", "Sec-Fetch-User": "?1",
+}
 GOLDAPI = "https://api.gold-api.com/price/{sym}"
 ERAPI = "https://open.er-api.com/v6/latest/USD"
 CURAPI = [
@@ -43,10 +57,15 @@ def now_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
 
 
-def get(url: str, timeout: int = 60) -> str:
-    req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept": "text/html,application/json;q=0.9,*/*;q=0.8"})
+def get(url: str, timeout: int = 60, headers: dict | None = None) -> str:
+    h = headers or {"User-Agent": UA, "Accept": "text/html,application/json;q=0.9,*/*;q=0.8"}
+    req = urllib.request.Request(url, headers=h)
     with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read().decode(r.headers.get_content_charset() or "utf-8", "replace")
+        raw = r.read()
+        if r.headers.get("Content-Encoding") == "gzip":
+            import gzip
+            raw = gzip.decompress(raw)
+        return raw.decode(r.headers.get_content_charset() or "utf-8", "replace")
 
 
 def get_json(url: str):
@@ -181,18 +200,23 @@ def parse_mufap(page: str):
 
 
 def fetch_funds(errors):
-    try:
-        page = get(MUFAP_URL, timeout=90)
-        items, debug = parse_mufap(page)
-        if not items:
-            errors.append({"source": "mufap", "error": "no funds parsed", "debug": debug, "bytes": len(page)})
-            return None
-        dates = sorted({f["date"] for f in items if f["date"]})
-        return {"source": "MUFAP", "url": MUFAP_URL, "fetched": now_iso(), "latest_date": dates[-1] if dates else None,
-                "count": len(items), "items": items}
-    except Exception as e:  # noqa: BLE001
-        errors.append({"source": "mufap", "error": repr(e)[:300]})
-        return None
+    tried = []
+    for url in MUFAP_URLS:
+        for hdrs in (BROWSER_HEADERS, None):
+            try:
+                page = get(url, timeout=90, headers=hdrs)
+            except Exception as e:  # noqa: BLE001
+                tried.append({"url": url, "browser": hdrs is not None, "error": repr(e)[:160]})
+                continue
+            items, debug = parse_mufap(page)
+            if items:
+                dates = sorted({f["date"] for f in items if f["date"]})
+                return {"source": "MUFAP", "url": url, "fetched": now_iso(), "latest_date": dates[-1] if dates else None,
+                        "count": len(items), "items": items}
+            tried.append({"url": url, "browser": hdrs is not None, "error": "no funds parsed", "bytes": len(page),
+                          "head": re.sub(r"\s+", " ", page[:400]), "debug": debug})
+    errors.append({"source": "mufap", "error": "all attempts failed", "attempts": tried})
+    return None
 
 
 # ---------------------------------------------------------------- metals & FX
