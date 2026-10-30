@@ -130,7 +130,7 @@ holdings.csv     : name,class,symbol,mode,unit,notes
 
 ## Roadmap ideas
 
-- **Automatic daily prices.** A scheduled GitHub Action would scrape PSX closing prices, MUFAP NAVs and the gold rate, then commit a `prices.json` to this repo. The app runs on the same origin, so it can read that file with no CORS issues and your data still never leaves the device.
+- **PSX closing prices** in the same daily feed.
 - Charts of portfolio value over time and per class.
 - Benchmarks such as KSE-100, T-bill and inflation, for comparison.
 
