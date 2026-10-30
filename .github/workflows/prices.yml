@@ -33,7 +33,7 @@ jobs:
           git config user.name "price-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add data/prices.json
-          [ -f data/psx.enc.json ] && git add data/psx.enc.json
+          if [ -f data/psx.enc.json ]; then git add data/psx.enc.json; fi
           if git diff --cached --quiet; then echo "no changes"; exit 0; fi
           git commit -m "prices: $(date -u +%Y-%m-%dT%H:%MZ)"
           for i in 1 2 3; do git pull --rebase -q origin main && git push && exit 0; sleep 5; done
