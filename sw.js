@@ -1,5 +1,5 @@
 // Service worker: caches the app shell so it opens offline. Bump VERSION on every release.
-const VERSION = 'pkw-v1.2.0';
+const VERSION = 'pkw-v1.3.0';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'finance.js', 'zakat.js', 'feed.js', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-192.png', 'icons/maskable-512.png'];
 
@@ -15,7 +15,7 @@ self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
   e.respondWith(
-    fetch(req).then(res => {
+    fetch(req, { cache: 'no-cache' }).then(res => {
       if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); }
       return res;
     }).catch(() => caches.match(req, { ignoreSearch: true }).then(r => r || caches.match('index.html')))

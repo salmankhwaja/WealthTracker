@@ -7,6 +7,8 @@ Sources
   funds   MUFAP daily NAV table (all AMCs)      https://www.mufap.com.pk/Industry/IndustryStatDaily?tab=3
   metals  gold-api.com spot XAU / XAG (USD/oz)  https://api.gold-api.com/price/XAU
           fallback: fawazahmed0 currency-api    https://github.com/fawazahmed0/exchange-api
+  psx     PSX Data Portal market watch (all shares, one request)  https://dps.psx.com.pk/market-watch
+          + share names from https://dps.psx.com.pk/symbols (best effort)
   fx      open.er-api.com (USD base)            https://open.er-api.com/v6/latest/USD
           fallback: fawazahmed0 currency-api
 
@@ -219,6 +221,89 @@ def fetch_funds(errors):
     return None
 
 
+
+# ---------------------------------------------------------------- PSX (parser adapted from Day-Trader-PSX)
+PSX_HOST = "https://dps.psx.com.pk"
+_CELL = re.compile(r"<t([hd])([^>]*)>(.*?)</t[hd]>", re.S | re.I)
+_TAG = re.compile(r"<[^>]+>")
+_PSX_FIELDS = {"symbol": "symbol", "sector": "sector", "listed in": "listed_in", "ldcp": "ldcp", "open": "open",
+               "high": "high", "low": "low", "current": "current", "change": "change", "change (%)": "change_pct",
+               "volume": "volume"}
+_PSX_ORDER = ["symbol", "sector", "listed_in", "ldcp", "open", "high", "low", "current", "change", "change_pct", "volume"]
+
+
+def _pnum(v):
+    v = (v or "").replace(",", "").replace("%", "").strip()
+    neg = v.startswith("(") and v.endswith(")")
+    try:
+        x = float(v.strip("()"))
+    except ValueError:
+        return None
+    return -x if neg else x
+
+
+def parse_market_watch(text):
+    """{SYMBOL: {sector, ldcp, open, high, low, current, change, change_pct, volume}} from PSX's market-watch table."""
+    order, quotes = None, {}
+    for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", text, re.S | re.I):
+        cells = _CELL.findall(tr)
+        if not cells:
+            continue
+        if all(k.lower() == "h" for k, _, _ in cells):
+            names = [html.unescape(_TAG.sub("", c)).strip().lower() for _, _, c in cells]
+            order = [_PSX_FIELDS.get(n, n) for n in names]
+            continue
+        row = {}
+        for (kind, attrs, body), name in zip(cells, order or _PSX_ORDER):
+            m = re.search(r'data-search="([^"]+)"', attrs)
+            txt = html.unescape(_TAG.sub("", body)).strip()
+            if name == "symbol":
+                val = m.group(1) if m else txt
+                row["symbol"] = val.split()[0].upper() if val.strip() else None
+            elif name in ("sector", "listed_in"):
+                row[name] = txt
+            else:
+                o = re.search(r'data-order="([^"]+)"', attrs)
+                row[name] = _pnum(o.group(1) if o else txt)
+        if row.get("symbol") and row.get("current"):
+            if row.get("change_pct") is None and row.get("ldcp"):
+                row["change_pct"] = round(100 * (row["current"] / row["ldcp"] - 1), 2)
+            quotes[row.pop("symbol")] = row
+    return quotes
+
+
+def pk_session_date(now=None):
+    """Latest PSX weekday session date in Pakistan time (holidays aside)."""
+    d = ((now or dt.datetime.now(dt.timezone.utc)) + dt.timedelta(hours=5)).date()
+    while d.weekday() >= 5:
+        d -= dt.timedelta(days=1)
+    return d.isoformat()
+
+
+def fetch_psx(errors):
+    try:
+        quotes = parse_market_watch(get(PSX_HOST + "/market-watch", timeout=60, headers=BROWSER_HEADERS))
+        if len(quotes) < 20:
+            raise ValueError(f"only {len(quotes)} quotes parsed")
+    except Exception as e:  # noqa: BLE001
+        errors.append({"source": "psx market-watch", "error": repr(e)[:300]})
+        return None
+    names = {}
+    try:
+        for x in get_json(PSX_HOST + "/symbols"):
+            if isinstance(x, dict) and x.get("symbol"):
+                names[str(x["symbol"]).upper()] = x.get("name") or ""
+    except Exception as e:  # noqa: BLE001
+        errors.append({"source": "psx symbols (names only)", "error": repr(e)[:160]})
+    items = {}
+    for sym, q in quotes.items():
+        items[sym] = {k: q.get(k) for k in ("current", "ldcp", "change_pct", "volume", "sector") if q.get(k) is not None}
+        if names.get(sym):
+            items[sym]["name"] = names[sym]
+    return {"source": "PSX Data Portal market watch", "url": PSX_HOST + "/market-watch", "fetched": now_iso(),
+            "date": pk_session_date(), "count": len(items), "items": items}
+
+
 # ---------------------------------------------------------------- metals & FX
 def fetch_metals(errors):
     out = {}
@@ -261,6 +346,7 @@ def fetch_fx(errors):
 def build(prev: dict) -> dict:
     errors = []
     funds = fetch_funds(errors)
+    psx = fetch_psx(errors)
     metals = fetch_metals(errors)
     fx = fetch_fx(errors)
 
@@ -297,6 +383,12 @@ def build(prev: dict) -> dict:
         elif (prev.get("metals") or {}).get(key):
             out["metals"][key] = {**prev["metals"][key], "stale": True}; stale.append(key)
 
+    # PSX
+    if psx:
+        out["psx"] = psx
+    elif prev.get("psx"):
+        out["psx"] = {**prev["psx"], "stale": True}; stale.append("psx")
+
     # Funds
     if funds:
         out["funds"] = funds
@@ -319,7 +411,7 @@ def main() -> int:
         json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
     f_ = data.get("funds") or {}
     print(f"funds={f_.get('count')} date={f_.get('latest_date')} usd={((data.get('fx') or {}).get('pkr') or {}).get('USD')} "
-          f"gold_tola={(data['metals'].get('gold') or {}).get('pkr_tola')} errors={len(data['errors'])} stale={data['stale']}")
+          f"psx={(data.get('psx') or {}).get('count')} gold_tola={(data['metals'].get('gold') or {}).get('pkr_tola')} errors={len(data['errors'])} stale={data['stale']}")
     for e in data["errors"]:
         print("ERROR", json.dumps(e)[:600], file=sys.stderr)
     return 0
