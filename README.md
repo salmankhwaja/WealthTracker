@@ -28,6 +28,18 @@ There are no accounts, servers or trackers. The data lives in the browser on you
 - **Works offline** through a service worker. Light and dark themes are supported.
 - **Strict Content-Security-Policy.** No third-party code is loaded.
 
+## Entering your history
+
+- **Mutual funds:** enter the **amount invested** (typed as `100,000`; commas are added as you type), and the app works out units = amount ÷ NAV.
+  - **Recent dates:** for linked funds, the NAV is filled in from MUFAP. For buys it uses the offer price (NAV + front-end load).
+  - **Older dates:** you type the NAV (or the offer price you paid) from your fund statement. The form flags when this is needed.
+- **PSX:** enter shares and price per share; the total including charges is calculated. Other holdings take a price per unit and a quantity.
+- **Example placeholders:** every field shows a faint example of what to enter.
+
+## Themes & header
+
+Tap the half-circle button in the header to switch between Auto (follows your phone), Light, Blue Gray, Black, Terminal and Red. The choice is saved per device. The header also shows the current time and date.
+
 ## Live prices
 
 A GitHub Action (`.github/workflows/prices.yml`) runs `scripts/fetch_prices.py` three times a day and commits `data/prices.json`. The app reads that file from its own site, so no personal data is sent anywhere, and it works offline from the last copy.
@@ -159,7 +171,8 @@ feed.js               maps data/prices.json (and decrypted PSX prices) to holdin
 charges.js            PSX brokerage, sales tax, CDC and levies estimate per trade (pure, tested)
 scripts/              price fetcher run by GitHub Actions
 data/prices.json      latest public prices (written by the Action)
-styles.css            mobile-first styles, light/dark
+styles.css            mobile-first styles, six themes
+theme-init.js         applies the saved theme before first paint
 sw.js                 offline cache
 manifest.webmanifest  install metadata
 tests/                node unit tests

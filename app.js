@@ -37,7 +37,40 @@
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36) + Math.random().toString(36).slice(2));
   const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
-  const num = v => (v === '' || v == null || !isFinite(+v)) ? null : +v;
+  const num = v => {
+    if (v == null) return null;
+    const t = String(v).replace(/,/g, '').trim();
+    return t === '' || !isFinite(+t) ? null : +t;
+  };
+  // ----- number fields with thousands separators (100,000) -----
+  function groupNum(raw) {
+    let s = String(raw ?? '').replace(/[^0-9.\-]/g, '');
+    const neg = s.startsWith('-'); s = s.replace(/-/g, '');
+    const [i, ...rest] = s.split('.');
+    const dec = rest.length ? '.' + rest.join('') : '';
+    const int = i.replace(/^0+(?=\d)/, '');
+    return (neg ? '-' : '') + (int ? int.replace(/\B(?=(\d{3})+(?!\d))/g, ',') : (dec ? '0' : '')) + dec;
+  }
+  function formatField(el) {
+    const before = el.value, caret = el.selectionStart ?? before.length;
+    const sig = before.slice(0, caret).replace(/[^0-9.\-]/g, '').length;
+    const after = groupNum(before);
+    if (after === before) return;
+    el.value = after;
+    let k = 0, pos = 0;
+    while (pos < after.length && k < sig) { if (/[0-9.\-]/.test(after[pos])) k++; pos++; }
+    try { if (document.activeElement === el) el.setSelectionRange(pos, pos); } catch { }
+  }
+  function enhanceNumbers(root) {
+    $$('input[type="number"]', root).forEach(el => {
+      el.type = 'text'; el.inputMode = 'decimal'; el.classList.add('numeric'); el.autocomplete = 'off';
+      if (el.value) el.value = groupNum(el.value);
+      el.addEventListener('input', () => formatField(el));
+    });
+  }
+  const setNum = (el, v, dp = 4) => { el.value = v == null || !isFinite(v) ? '' : groupNum(String(+(+v).toFixed(dp))); };
+  new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1) enhanceNumbers(n.matches?.('input') ? n.parentNode : n); })
+    .observe(document.documentElement, { childList: true, subtree: true });
   const byDate = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
   const nf0 = new Intl.NumberFormat('en-PK', { maximumFractionDigits: 0 });
   const nf2 = new Intl.NumberFormat('en-PK', { maximumFractionDigits: 4 });
@@ -305,7 +338,7 @@
       for (const inp of $$('[data-upd]', el)) {
         const h = state.holdings.find(x => x.id === inp.dataset.upd);
         const lp = h && livePrice(h);
-        if (lp && lp.price > 0) { inp.value = +lp.price.toFixed(4); inp.dataset.dirty = '1'; n++; }
+        if (lp && lp.price > 0) { setNum(inp, lp.price); inp.dataset.dirty = '1'; n++; }
       }
       toast(n ? `Filled ${n} price${n > 1 ? 's' : ''} — review, then Save` : 'No live prices available right now');
     };
@@ -372,7 +405,6 @@
   }
 
   function renderAll() {
-    $('#asof').textContent = fmtDate(today());
     normalizeZakat(); normalizeMarket();
     renderOverview(); renderHoldings(); renderUpdate(); renderData();
     if (!$('#view-zakat').contains(document.activeElement)) renderZakat();
@@ -999,7 +1031,7 @@
       .map(h => `<option value="${h.id}">${esc(h.name)} · ${CLASSES[h.cls].label}</option>`).join('') + '<option value="__new">+ New holding…</option>';
     f.hid.value = txn?.hid || hid || state.holdings[0].id;
     f.date.value = txn?.date || today();
-    f.amount.value = txn?.amount ?? ''; f.units.value = txn?.units ?? ''; f.note.value = txn?.note || '';
+    setNum(f.amount, txn?.amount ?? null, 2); setNum(f.units, txn?.units ?? null, 6); f.note.value = txn?.note || '';
     const sync = () => {
       if (f.hid.value === '__new') { dlg.close(); openHolding(null, h => openTxn(h.id)); return; }
       const h = state.holdings.find(x => x.id === f.hid.value);
@@ -1011,38 +1043,100 @@
     const C = window.Charges;
     $('#txn-broker').innerHTML = Object.entries(C.BROKERS).map(([k, b]) => `<option value="${k}">${esc(b.name)}</option>`).join('');
     $('#txn-broker').value = txn?.broker || state.market?.broker || 'psx-minimum';
-    $('#txn-price').value = txn?.price ?? '';
-    const isTrade = h => h && h.cls === 'psx' && h.mode === 'units' && (f.type.value === 'BUY' || f.type.value === 'SELL');
+    setNum($('#txn-price'), txn?.price ?? null);
+    let priceAuto = false, unitsTouched = !!txn;
+    const priceMode = h => h && h.mode === 'units' && (f.type.value === 'BUY' || f.type.value === 'SELL') ? (h.cls === 'psx' ? 'psx' : 'unit') : null;
+    // Latest market price for this holding — usable only when the entry date is on/after the price date.
+    const feedPriceForDate = h => {
+      if (!h?.feed || !feedData) return null;
+      const buy = f.type.value === 'BUY';
+      if (h.feed.type === 'mufap') {
+        const it = FD.findFund(feedData, h.feed.fund);
+        if (!it) return null;
+        if (f.date.value && it.date && f.date.value < it.date) return { old: true, date: it.date };
+        const p = buy ? (it.offer || it.nav) : (it.repurchase || it.nav);
+        const label = buy && it.offer && it.offer !== it.nav ? 'offer price (NAV + front-end load)' : !buy && it.repurchase && it.repurchase !== it.nav ? 'repurchase price' : 'NAV';
+        return { price: p, date: it.date, label: 'MUFAP ' + label };
+      }
+      const lp = livePrice(h);
+      if (!lp) return null;
+      if (f.date.value && lp.date && f.date.value < lp.date) return { old: true, date: lp.date };
+      return { price: lp.price, date: lp.date, label: lp.source };
+    };
+    let priceNote = '';
+    const fillPrice = h => {
+      const fp = feedPriceForDate(h);
+      const isMf = h.cls === 'mf';
+      if (fp && fp.price && (priceAuto || !$('#txn-price').value)) {
+        setNum($('#txn-price'), fp.price); priceAuto = true;
+        priceNote = `Filled from ${fp.label} for ${fmtDate(fp.date)}.`;
+      } else if (priceAuto && (!fp || fp.old)) {
+        $('#txn-price').value = ''; priceAuto = false;
+      }
+      if (!priceAuto) {
+        priceNote = fp?.old
+          ? `<span class="old-date">Older date — enter the ${isMf ? 'NAV (or offer price you paid)' : 'price'} for ${fmtDate(f.date.value)} yourself${isMf ? ', from your fund statement or MUFAP' : ''}. Latest available is ${fmtDate(fp.date)}.</span>`
+          : h.feed ? '' : `Enter the ${isMf ? 'NAV / offer price' : 'price'} you ${f.type.value === 'SELL' ? 'sold' : 'bought'} at.`;
+      }
+    };
     const calc = () => {
       const h = state.holdings.find(x => x.id === f.hid.value);
-      if (!isTrade(h)) return;
-      const qn = num(f.units.value), pr = num($('#txn-price').value);
-      if (!(qn > 0) || !(pr > 0)) { $('#txn-calc').textContent = 'Enter shares and price to work out charges — or type the total from your contract note.'; return; }
-      const c = C.tradeCharges($('#txn-broker').value, f.type.value === 'SELL' ? 'sell' : 'buy', qn, pr);
-      f.amount.value = c.net.toFixed(2);
-      $('#txn-calc').textContent = `Value ${money(c.value)} · commission ${money(c.commission)} · SST ${money(c.taxes)} · CDC/levies ${money(c.other)} → ${f.type.value === 'SELL' ? 'you receive' : 'you pay'} ${money(c.net)}. Estimate — your contract note wins.`;
+      const mode = priceMode(h);
+      if (!mode) return;
+      const qn = num(f.units.value), pr = num($('#txn-price').value), amt = num(f.amount.value);
+      const out = $('#txn-calc');
+      if (mode === 'psx') {
+        if (!(qn > 0) || !(pr > 0)) { out.innerHTML = (priceNote ? priceNote + '<br>' : '') + 'Enter shares and price to work out charges, or type the total from your contract note.'; return; }
+        const c = C.tradeCharges($('#txn-broker').value, f.type.value === 'SELL' ? 'sell' : 'buy', qn, pr);
+        setNum(f.amount, c.net, 2);
+        out.innerHTML = (priceNote ? priceNote + '<br>' : '') + `Value ${money(c.value)} · commission ${money(c.commission)} · SST ${money(c.taxes)} · CDC/levies ${money(c.other)} → ${f.type.value === 'SELL' ? 'you receive' : 'you pay'} <b>${money(c.net)}</b>. Estimate — your contract note wins.`;
+        return;
+      }
+      let line = '';
+      if (pr > 0 && amt > 0 && !unitsTouched) {
+        const u = amt / pr;
+        setNum(f.units, u, 4);
+        line = `${groupNum(String(amt))} ÷ ${groupNum(String(pr))} = <b>${groupNum(u.toFixed(4))} ${esc(h.unit || 'units')}</b>`;
+      } else if (pr > 0 && qn > 0 && !(amt > 0)) {
+        setNum(f.amount, qn * pr, 2);
+        line = `${groupNum(String(qn))} × ${groupNum(String(pr))} = <b>${money(qn * pr)}</b>`;
+      } else if (unitsTouched && qn > 0 && amt > 0) {
+        line = `Implied price: <b>${groupNum((amt / qn).toFixed(4))}</b> per ${esc((h.unit || 'unit').replace(/s$/i, ''))}. Clear Units to recalculate from the price.`;
+      }
+      out.innerHTML = [priceNote, line].filter(Boolean).join('<br>');
     };
-    $('#txn-price').oninput = calc; $('#txn-broker').onchange = calc; f.units.oninput = calc;
+    $('#txn-price').addEventListener('input', () => { priceAuto = false; priceNote = ''; calc(); });
+    $('#txn-broker').onchange = calc;
+    f.amount.addEventListener('input', () => { const h = state.holdings.find(x => x.id === f.hid.value); if (priceMode(h) === 'unit') calc(); });
+    f.units.addEventListener('input', () => { unitsTouched = f.units.value.trim() !== ''; calc(); });
+    f.date.addEventListener('change', () => { const h = state.holdings.find(x => x.id === f.hid.value); if (priceMode(h)) { fillPrice(h); calc(); } });
     const syncTrade = h => {
-      const on = isTrade(h);
-      $('#txn-trade').hidden = !on;
-      if (on && !txn && !$('#txn-price').value) { const lp = livePrice(h); if (lp) $('#txn-price').value = +lp.price.toFixed(2); }
-      if (on) calc();
+      const mode = priceMode(h);
+      $('#txn-trade').hidden = !mode;
+      if (!mode) return;
+      const unit = (h.unit || 'unit').replace(/s$/i, '');
+      $('#txn-trade-legend').textContent = mode === 'psx' ? 'PSX trade' : h.cls === 'mf' ? 'NAV & units' : 'Price & quantity';
+      $('#txn-price-label').textContent = mode === 'psx' ? 'Price per share (PKR)' : h.cls === 'mf' ? `NAV / offer price per ${unit} (PKR)` : `Price per ${unit} (PKR)`;
+      $('#txn-broker-wrap').hidden = mode !== 'psx';
+      $('#txn-price').placeholder = mode === 'psx' ? 'e.g. 253.50' : h.cls === 'mf' ? 'e.g. 154.0400' : 'e.g. 413,305';
+      f.units.placeholder = mode === 'psx' ? 'e.g. 500' : h.cls === 'mf' ? 'worked out from amount ÷ NAV' : 'e.g. 1.5';
+      if (!txn) fillPrice(h);
+      calc();
     };
     const syncType = h => {
       syncTrade(h);
       const t = f.type.value, u = h.mode === 'units';
       const needUnits = u && (t === 'BUY' || t === 'SELL' || t === 'REINVEST');
       $('#txn-units-wrap').hidden = !needUnits;
-      $('#txn-units-label').textContent = `${t === 'REINVEST' ? 'Units added' : 'Units'}${h.unit ? ' (' + h.unit + ')' : ''}`;
+      $('#txn-units-label').textContent = `${t === 'REINVEST' ? 'Units added' : h.cls === 'psx' ? 'Shares' : 'Units'}${h.unit && !/^(units?|shares?)$/i.test(h.unit) ? ' (' + h.unit + ')' : ''}`;
       $('#txn-amount-label').textContent = {
-        BUY: u ? 'Total paid incl. commission (PKR)' : 'Amount deposited (PKR)',
+        BUY: u ? (h.cls === 'psx' ? 'Total paid incl. charges (PKR)' : h.cls === 'mf' ? 'Amount invested (PKR)' : 'Total paid (PKR)') : 'Amount deposited (PKR)',
         SELL: u ? 'Total received after charges (PKR)' : 'Amount withdrawn (PKR)',
         INCOME: 'Amount received (PKR, after tax)', REINVEST: 'Amount (optional, info only)', FEE: 'Amount paid (PKR)',
       }[t];
       f.amount.required = t !== 'REINVEST'; f.units.required = needUnits;
       $('#txn-hint').textContent = {
-        BUY: u ? 'Price per unit is worked out from amount ÷ units.' : 'Money you moved into this account.',
+        BUY: u ? '' : 'Money you moved into this account.',
         SELL: u ? '' : 'Money you took out of this account.',
         INCOME: u ? 'Cash dividends or payouts that reached your bank. Reinvested payouts go under “Bonus / reinvested units”.' : 'Only if profit was paid to another account. If it was credited to this account, just update the balance.',
         REINVEST: 'Bonus shares or reinvested dividends: adds units without new cash.',
@@ -1057,7 +1151,10 @@
       e.preventDefault();
       const h = state.holdings.find(x => x.id === f.hid.value);
       const rec = { hid: h.id, date: f.date.value, type: f.type.value, amount: num(f.amount.value) ?? 0, units: $('#txn-units-wrap').hidden ? null : num(f.units.value), note: f.note.value.trim() };
-      if (!$('#txn-trade').hidden && num($('#txn-price').value) > 0) { rec.price = num($('#txn-price').value); rec.broker = $('#txn-broker').value; state.market.broker = rec.broker; }
+      if (!$('#txn-trade').hidden && num($('#txn-price').value) > 0) {
+        rec.price = num($('#txn-price').value);
+        if (!$('#txn-broker-wrap').hidden) { rec.broker = $('#txn-broker').value; state.market.broker = rec.broker; }
+      }
       if (rec.type === 'SELL' && h.mode === 'units') {
         const s = holdingStats(h);
         const held = s.units + (txn && txn.type === 'SELL' && txn.hid === h.id ? (num(txn.units) || 0) : 0) - (txn && txn.hid === h.id && (txn.type === 'BUY' || txn.type === 'REINVEST') ? (num(txn.units) || 0) : 0);
@@ -1335,8 +1432,40 @@
     await save(); renderAll(); toast('Sample data loaded — delete the holdings when done');
   }
 
+  // ---------- header: clock & themes ----------
+  const THEMES = [
+    { id: 'auto', label: 'Auto (follow phone)' }, { id: 'light', label: 'Light' }, { id: 'bluegray', label: 'Blue Gray' },
+    { id: 'black', label: 'Black' }, { id: 'terminal', label: 'Terminal' }, { id: 'red', label: 'Red' },
+  ];
+  function tickClock() {
+    const d = new Date();
+    const date = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    $('#clock').innerHTML = `<b>${esc(time)}</b><br>${esc(date)}`;
+  }
+  function applyTheme(id) {
+    const valid = THEMES.some(t => t.id === id) ? id : 'auto';
+    document.documentElement.setAttribute('data-theme', valid);
+    try { localStorage.setItem('pkw-theme', valid); } catch { }
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#0f766e');
+    $$('#theme-menu button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.theme === valid)));
+  }
+  function setupThemes() {
+    const btn = $('#theme-btn'), menu = $('#theme-menu');
+    menu.innerHTML = THEMES.map(t => `<button role="menuitemradio" data-theme="${t.id}" aria-checked="false"><span class="swatch swatch-${t.id}"></span>${t.label}</button>`).join('');
+    const close = () => { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
+    btn.onclick = e => { e.stopPropagation(); menu.hidden = !menu.hidden; btn.setAttribute('aria-expanded', String(!menu.hidden)); };
+    $$('button', menu).forEach(b => b.onclick = () => { applyTheme(b.dataset.theme); close(); });
+    document.addEventListener('click', e => { if (!menu.hidden && !menu.contains(e.target)) close(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+    applyTheme(document.documentElement.getAttribute('data-theme'));
+  }
+
   // ---------- boot ----------
-  const APP_VERSION = '1.3.0';
+  setupThemes(); tickClock(); setInterval(tickClock, 15000);
+  enhanceNumbers(document);
+  const APP_VERSION = '1.4.0';
   $$('.tabbar button').forEach(b => b.onclick = () => showView(b.dataset.view));
   $('#fab').onclick = () => openTxn();
   // close dialogs by tapping the backdrop

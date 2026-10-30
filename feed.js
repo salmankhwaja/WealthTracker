@@ -13,6 +13,7 @@
     return null;
   }
 
+  const n = v => Number(String(v == null ? '' : v).replace(/,/g, ''));
   const norm = s => String(s || '').toLowerCase().replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
   function findFund(data, name) {
     const items = data && data.funds && data.funds.items;
@@ -25,12 +26,12 @@
   function metalPerGram(data, metal, market) {
     const m = (market && market[metal]) || {};
     if (m.source === 'manual') {
-      const v = Number(m.manualTola);
+      const v = n(m.manualTola);
       return v > 0 ? { perGram: v / TOLA_G, date: m.manualDate || null, source: 'Your entered rate', stale: false } : null;
     }
     const x = data && data.metals && data.metals[metal];
     if (!x || !(x.pkr_gram > 0)) return null;
-    const prem = Number(m.premiumPct) || 0;
+    const prem = n(m.premiumPct) || 0;
     return { perGram: x.pkr_gram * (1 + prem / 100), date: String(x.time || data.updated || '').slice(0, 10), source: x.source + (prem ? ` +${prem}%` : ''), stale: !!x.stale };
   }
 
