@@ -54,6 +54,12 @@
       <label id="txn-units-wrap"><span id="txn-units-label">Units</span>
         <input type="number" name="units" step="any" min="0" inputmode="decimal">
       </label>
+      <fieldset id="txn-trade" class="feed-box">
+        <legend>PSX trade</legend>
+        <label>Price per share (PKR) <input type="number" id="txn-price" step="any" min="0" inputmode="decimal"></label>
+        <label>Broker <select id="txn-broker"></select></label>
+        <p class="hint" id="txn-calc"></p>
+      </fieldset>
       <p class="hint" id="txn-hint"></p>
       <label>Note <input type="text" name="note" maxlength="200" autocomplete="off"></label>
       <div class="actions">
@@ -84,11 +90,16 @@
         <label>Source
           <select id="feed-type">
             <option value="">None — I'll enter prices</option>
+            <option value="psx">PSX share price</option>
             <option value="mufap">Mutual fund NAV (MUFAP)</option>
             <option value="metal">Gold / silver rate</option>
             <option value="fx">Exchange rate</option>
           </select>
         </label>
+        <div id="feed-psx">
+          <label>PSX symbol <input type="text" id="feed-psx-sym" list="feed-psx-list" autocomplete="off" autocapitalize="characters" placeholder="e.g. OGDC"></label>
+          <datalist id="feed-psx-list"></datalist>
+        </div>
         <div id="feed-mufap">
           <label>AMC <select id="feed-amc"></select></label>
           <label>Fund <select id="feed-fund"></select></label>
@@ -116,7 +127,7 @@
   <!-- Fund NAV browser -->
   <dialog id="dlg-navs" class="sheet">
     <div class="nav-body">
-      <div class="detail-head"><h2>Fund NAVs</h2><button class="x" data-close aria-label="Close">×</button></div>
+      <div class="detail-head"><h2 id="nav-title">Fund NAVs</h2><button class="x" data-close aria-label="Close">×</button></div>
       <p class="muted small" id="nav-meta"></p>
       <input type="search" id="nav-q" placeholder="Search fund, AMC or category" autocomplete="off">
       <select id="nav-amc"></select>
@@ -159,6 +170,7 @@
   <script src="finance.js"></script>
   <script src="zakat.js"></script>
   <script src="feed.js"></script>
+  <script src="charges.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

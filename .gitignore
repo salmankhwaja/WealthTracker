@@ -4,3 +4,7 @@
 .DS_Store
 node_modules/
 !data/prices.json
+!data/psx.enc.json
+!tests/fixtures/*.json
+__pycache__/
+*.pyc

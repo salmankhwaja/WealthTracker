@@ -36,6 +36,7 @@ A GitHub Action (`.github/workflows/prices.yml`) runs `scripts/fetch_prices.py` 
 |---|---|---|
 | Mutual fund NAVs, all AMCs (NBP, Al Meezan, ABL, HBL, MCB, UBL, Alfalah…) | [MUFAP daily NAV table](https://www.mufap.com.pk/Industry/IndustryStatDaily?tab=3) | NAV, offer, repurchase, validity date |
 | Gold & silver | [gold-api.com](https://gold-api.com) spot (USD/oz) × USD/PKR | Fallback: fawazahmed0 currency-api |
+| PSX share prices (all listed shares) | [PSX Data Portal market watch](https://dps.psx.com.pk/market-watch) | **Encrypted only**, see below |
 | USD, EUR, GBP, AED, SAR, CNY → PKR | [ExchangeRate-API open access](https://www.exchangerate-api.com) | Mid-market rate |
 
 In the app:
@@ -47,6 +48,20 @@ In the app:
   - International spot, optionally with a local premium %.
   - Your own rate, for example the Sarafa rate.
 - **Zakat → Use market rates** fills gold and silver for nisab.
+
+### PSX prices (private, encrypted)
+
+PSX restricts redistribution of its market data, and this repo is public. So PSX prices are fetched only when you set a passphrase. They are written only as `data/psx.enc.json`, encrypted with AES-256-GCM (key derived with PBKDF2-SHA256), and the app decrypts them on your device.
+
+1. Pick a long passphrase.
+2. In the repo, open **Settings → Secrets and variables → Actions → New repository secret**. Name it `PSX_DATA_KEY` and paste the passphrase as the value.
+3. In the app, go to **Data → PSX share prices (private)**, enter the same passphrase and tap **Save & unlock**. Do this once on each device.
+
+Once unlocked:
+
+- Link a PSX holding to its symbol (Edit holding → Auto price → PSX share price), or tap **Track** in **PSX shares**.
+- The Holdings list shows each share's change today.
+- **Buy and sell entries** for PSX holdings take the shares, the price per share and your broker. The app works out commission, 13% sales tax on it, CDC and levies (presets from Day-Trader-PSX, including Finqalab) and fills in the total. Your contract note always wins: you can overwrite the total.
 
 TradingView is deliberately not used: its terms license prices for on-screen display only and prohibit automated processing.
 
@@ -130,7 +145,6 @@ holdings.csv     : name,class,symbol,mode,unit,notes
 
 ## Roadmap ideas
 
-- **PSX closing prices** in the same daily feed.
 - Charts of portfolio value over time and per class.
 - Benchmarks such as KSE-100, T-bill and inflation, for comparison.
 
@@ -141,7 +155,8 @@ index.html            app shell and dialogs
 app.js                UI, storage, import/export, encryption
 finance.js            XIRR, CAGR and CSV helpers (pure, tested)
 zakat.js              Zakat / nisab calculation (pure, tested)
-feed.js               maps data/prices.json to holding prices (pure, tested)
+feed.js               maps data/prices.json (and decrypted PSX prices) to holding prices (pure, tested)
+charges.js            PSX brokerage, sales tax, CDC and levies estimate per trade (pure, tested)
 scripts/              price fetcher run by GitHub Actions
 data/prices.json      latest public prices (written by the Action)
 styles.css            mobile-first styles, light/dark

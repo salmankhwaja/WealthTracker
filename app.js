@@ -227,6 +227,11 @@
     wireMarketCard(el);
   }
 
+  function dayChg(h) {
+    const lp = h.feed?.type === 'psx' ? livePrice(h) : null;
+    return lp && lp.changePct != null ? ` <span class="small ${sign(lp.changePct)}">${lp.changePct >= 0 ? '▲' : '▼'}${Math.abs(lp.changePct).toFixed(2)}%</span>` : '';
+  }
+
   function renderHoldings() {
     const el = $('#view-holdings');
     if (!state.holdings.length) {
@@ -243,7 +248,7 @@
           .map(s => `<div class="row" data-hid="${s.h.id}">
             <div><div class="name">${esc(s.h.name)}${s.stale ? '<span class="badge">stale</span>' : ''}</div>
               <div class="sub">${s.h.mode === 'units' ? `${qty(s.units)} ${esc(s.h.unit || '')} @ ${s.price != null ? qty(s.price) : '—'}` : `as of ${fmtDate(s.valDate)}`}</div></div>
-            <div class="right"><div>${money(s.value)}</div><div class="sub">${metricLine(s)}</div></div>
+            <div class="right"><div>${money(s.value)}${dayChg(s.h)}</div><div class="sub">${metricLine(s)}</div></div>
           </div>`).join('')}</div>`).join('');
     $('#h-add').onclick = () => openHolding();
     $('#h-txn').onclick = () => openTxn();
@@ -691,7 +696,7 @@
   const FD = window.Feed;
   const FX_CODES = ['USD', 'EUR', 'GBP', 'AED', 'SAR', 'CNY'];
   let feedData = null;
-  const emptyMarket = () => ({ gold: { source: 'spot', premiumPct: '', manualTola: '', manualDate: '' }, silver: { source: 'spot', premiumPct: '', manualTola: '', manualDate: '' }, navField: 'nav', autoApply: true });
+  const emptyMarket = () => ({ broker: 'psx-minimum', gold: { source: 'spot', premiumPct: '', manualTola: '', manualDate: '' }, silver: { source: 'spot', premiumPct: '', manualTola: '', manualDate: '' }, navField: 'nav', autoApply: true });
   function normalizeMarket() {
     const e = emptyMarket();
     state.market = { ...e, ...(state.market || {}) };
@@ -704,7 +709,22 @@
       if (r.ok) { feedData = await r.json(); try { await Store.set('feed', feedData); } catch { } }
     } catch { }
     if (!feedData) { try { feedData = (await Store.get('feed')) || null; } catch { } }
+    if (feedData) await loadPsx(force);
     return feedData;
+  }
+  // PSX prices are published only encrypted (PSX restricts redistribution); decrypt with the device-held passphrase.
+  async function loadPsx(force) {
+    let pass = null, doc = null;
+    try { pass = await Store.get('psxkey'); } catch { }
+    if (!pass) return false;
+    try {
+      const r = await fetch('data/psx.enc.json', { cache: force ? 'no-store' : 'no-cache' });
+      if (r.ok) { doc = await r.json(); try { await Store.set('psxenc', doc); } catch { } }
+    } catch { }
+    if (!doc) { try { doc = await Store.get('psxenc'); } catch { } }
+    if (!doc) return false;
+    try { feedData.psx = await FD.decryptDoc(doc, pass); feedData.psx.stale = !!feedData.psx_private?.stale; return true; }
+    catch { feedData.psx = null; feedData.psxError = 'wrong passphrase'; return false; }
   }
   const linked = () => state.holdings.filter(h => h.feed && h.mode === 'units');
   const livePrice = h => (h.feed ? FD.priceFor(feedData, h.feed, h.unit, state.market) : null);
@@ -749,32 +769,50 @@
         <div class="kpi"><div class="k">USD / PKR${st('fx')}</div><div class="v">${usd ? qty(usd) : '—'}</div></div>
         <div class="kpi"><div class="k">Gold 24K / tola${st('gold')}</div><div class="v">${g ? money(g.perGram * FD.TOLA_G) : '—'}</div></div>
         <div class="kpi"><div class="k">Silver / tola${st('silver')}</div><div class="v">${sv ? money(sv.perGram * FD.TOLA_G) : '—'}</div></div>
+        <div class="kpi"><div class="k">PSX closes${st('psx')}</div><div class="v small-v">${feedData.psx ? feedData.psx.count + ' · ' + fmtDate(feedData.psx.date) : 'unavailable'}</div></div>
         <div class="kpi"><div class="k">Fund NAVs${st('funds')}</div><div class="v small-v">${feedData.funds ? feedData.funds.count + ' · ' + fmtDate(feedData.funds.latest_date) : 'unavailable'}</div></div>
       </div>
-      <p class="info small">${g ? 'Gold: ' + esc(g.source) + '. ' : ''}<button class="link" data-goto="data">Sources & settings</button>${feedData.funds ? ' · <button class="link" id="mkt-navs">Browse fund NAVs</button>' : ''}</p>
+      <p class="info small">${g ? 'Gold: ' + esc(g.source) + '. ' : ''}<button class="link" data-goto="data">Sources & settings</button>${feedData.psx ? ' · <button class="link" id="mkt-psx">PSX shares</button>' : ''}${feedData.funds ? ' · <button class="link" id="mkt-navs">Fund NAVs</button>' : ''}</p>
     </div>`;
   }
 
   function wireMarketCard(el) {
     $$('[data-goto]', el).forEach(b => b.onclick = () => showView(b.dataset.goto));
     if ($('#mkt-navs', el)) $('#mkt-navs', el).onclick = () => openNavBrowser();
+    if ($('#mkt-psx', el)) $('#mkt-psx', el).onclick = () => openBrowser('psx');
   }
 
-  function openNavBrowser() {
+  function openNavBrowser() { openBrowser('funds'); }
+  function openBrowser(kind) {
     const dlg = $('#dlg-navs');
-    const items = feedData?.funds?.items || [];
-    $('#nav-amc').innerHTML = '<option value="">All AMCs</option>' + FD.amcList(feedData).map(a => `<option>${esc(a)}</option>`).join('');
-    $('#nav-meta').textContent = feedData?.funds ? `${feedData.funds.count} funds from MUFAP · latest ${fmtDate(feedData.funds.latest_date)}` : '';
+    const isPsx = kind === 'psx';
+    $('#nav-title').textContent = isPsx ? 'PSX shares' : 'Fund NAVs';
+    const items = isPsx ? FD.psxList(feedData) : (feedData?.funds?.items || []);
+    const groups = isPsx ? [...new Set(items.map(x => x.sector || 'Other'))].sort() : FD.amcList(feedData);
+    $('#nav-amc').innerHTML = `<option value="">${isPsx ? 'All sectors' : 'All AMCs'}</option>` + groups.map(a => `<option>${esc(a)}</option>`).join('');
+    $('#nav-meta').textContent = isPsx ? (feedData?.psx ? `${feedData.psx.count} shares · closing prices ${fmtDate(feedData.psx.date)}` : '')
+      : (feedData?.funds ? `${feedData.funds.count} funds from MUFAP · latest ${fmtDate(feedData.funds.latest_date)}` : '');
+    $('#nav-q').placeholder = isPsx ? 'Search symbol, company or sector' : 'Search fund, AMC or category';
     const draw = () => {
-      const q = $('#nav-q').value.trim().toLowerCase(), amc = $('#nav-amc').value;
-      const list = items.filter(f => (!amc || (f.amc || 'Other') === amc) && (!q || (f.fund + ' ' + f.category + ' ' + f.amc).toLowerCase().includes(q)));
-      const tracked = new Set(state.holdings.filter(h => h.feed?.type === 'mufap').map(h => h.feed.fund.toLowerCase()));
-      $('#nav-list').innerHTML = list.slice(0, 150).map((f, i) => `<div class="li"><div><b>${esc(f.fund)}</b><br><span class="muted">${esc(f.category || '')}${f.amc ? ' · ' + esc(f.amc) : ''}</span></div>
-        <div class="right"><b>${qty(f.nav)}</b><br><span class="muted small">${fmtDate(f.date)}</span><br>${tracked.has(f.fund.toLowerCase()) ? '<span class="muted small">tracked</span>' : `<button class="link" data-track="${esc(f.fund)}">Track</button>`}</div></div>`).join('')
-        + (list.length > 150 ? `<p class="muted small">Showing 150 of ${list.length} — refine the search.</p>` : '') + (list.length ? '' : '<p class="muted">No matching funds.</p>');
+      const q = $('#nav-q').value.trim().toLowerCase(), g = $('#nav-amc').value;
+      let list, tracked;
+      if (isPsx) {
+        list = items.filter(x => (!g || (x.sector || 'Other') === g) && (!q || (x.symbol + ' ' + (x.name || '') + ' ' + (x.sector || '')).toLowerCase().includes(q)));
+        if (q) list.sort((a, b) => (b.symbol.toLowerCase() === q) - (a.symbol.toLowerCase() === q) || (b.symbol.toLowerCase().startsWith(q)) - (a.symbol.toLowerCase().startsWith(q)));
+        tracked = new Set(state.holdings.filter(h => h.feed?.type === 'psx').map(h => h.feed.symbol.toUpperCase()));
+        $('#nav-list').innerHTML = list.slice(0, 150).map(x => `<div class="li"><div><b>${esc(x.symbol)}</b>${x.name ? ' · ' + esc(x.name) : ''}<br><span class="muted">${esc(x.sector || '')}${x.volume ? ' · vol ' + nf0.format(x.volume) : ''}</span></div>
+          <div class="right"><b>${qty(x.current)}</b><br><span class="small ${sign(x.change_pct)}">${x.change_pct != null ? (x.change_pct >= 0 ? '+' : '') + x.change_pct.toFixed(2) + '%' : ''}</span><br>${tracked.has(x.symbol) ? '<span class="muted small">tracked</span>' : `<button class="link" data-track="${esc(x.symbol)}">Track</button>`}</div></div>`).join('');
+      } else {
+        list = items.filter(f => (!g || (f.amc || 'Other') === g) && (!q || (f.fund + ' ' + f.category + ' ' + f.amc).toLowerCase().includes(q)));
+        tracked = new Set(state.holdings.filter(h => h.feed?.type === 'mufap').map(h => h.feed.fund.toLowerCase()));
+        $('#nav-list').innerHTML = list.slice(0, 150).map(f => `<div class="li"><div><b>${esc(f.fund)}</b><br><span class="muted">${esc(f.category || '')}${f.amc ? ' · ' + esc(f.amc) : ''}</span></div>
+          <div class="right"><b>${qty(f.nav)}</b><br><span class="muted small">${fmtDate(f.date)}</span><br>${tracked.has(f.fund.toLowerCase()) ? '<span class="muted small">tracked</span>' : `<button class="link" data-track="${esc(f.fund)}">Track</button>`}</div></div>`).join('');
+      }
+      $('#nav-list').innerHTML += (list.length > 150 ? `<p class="muted small">Showing 150 of ${list.length} — refine the search.</p>` : '') + (list.length ? '' : '<p class="muted">Nothing matches.</p>');
       $$('[data-track]', $('#nav-list')).forEach(b => b.onclick = () => {
         dlg.close();
-        openHolding(null, null, { name: b.dataset.track, cls: 'mf', feed: { type: 'mufap', fund: b.dataset.track } });
+        const k = b.dataset.track;
+        openHolding(null, null, isPsx ? { name: k, cls: 'psx', symbol: k, feed: { type: 'psx', symbol: k } } : { name: k, cls: 'mf', feed: { type: 'mufap', fund: k } });
       });
     };
     $('#nav-q').oninput = draw; $('#nav-amc').onchange = draw; $('#nav-q').value = '';
@@ -793,14 +831,25 @@
         <p class="info">Prices refresh three times a day on this site from public sources, then load on your phone. No personal data is sent anywhere.</p>
         <label class="zk-check"><input type="checkbox" id="mk-auto" ${m.autoApply ? 'checked' : ''}><span>Update linked holdings automatically when the app opens</span></label>
         <div class="btn-grid gap-top"><button class="primary" id="mk-refresh">Refresh & apply now</button><button class="ghost" id="mk-navs">Browse fund NAVs</button></div>
+        <button class="link" id="mk-psx">Browse PSX shares</button>
+      </div>
+      <div class="card">
+        <b>PSX share prices (private)</b>
+        <p class="info small">PSX restricts redistribution of its market data, so this site publishes PSX prices only as an encrypted file. Enter the same passphrase you saved as the repo's <code>PSX_DATA_KEY</code> secret; it stays on this device.
+        ${feedData?.psx ? `<br><span class="pos">Unlocked · ${feedData.psx.count} shares · ${fmtDate(feedData.psx.date)}</span>` : feedData?.psxError ? '<br><span class="neg">That passphrase did not unlock the file.</span>' : feedData?.psx_private?.available ? '<br>Encrypted prices are available on this site.' : '<br>Not enabled on this site yet.'}</p>
+        <label class="zk-field">Passphrase<input type="password" id="mk-psxkey" autocomplete="off" placeholder="${feedData?.psx ? '•••••• (saved)' : ''}"></label>
+        <button class="ghost" id="mk-psxsave">Save & unlock</button>
       </div>
       <div class="card">
         ${metal('gold', 'Gold')}
         ${metal('silver', 'Silver')}
+        <label class="zk-field">Default PSX broker (for trade charges)
+          <select data-mk="broker">${Object.entries(window.Charges.BROKERS).map(([k, b]) => `<option value="${k}">${esc(b.name)}</option>`).join('')}</select></label>
         <label class="zk-field">Mutual fund price to use
           <select data-mk="navField"><option value="nav">NAV</option><option value="repurchase">Repurchase (what you'd get on redemption)</option></select></label>
       </div>
       <div class="card list-mini">
+        <div class="li"><div><b>PSX share prices</b><br><span class="muted">PSX Data Portal market watch (closing / last prices)</span></div><a class="chip-link" href="https://dps.psx.com.pk/market-watch" target="_blank" rel="noopener noreferrer">Open ↗</a></div>
         <div class="li"><div><b>Mutual fund NAVs</b><br><span class="muted">MUFAP daily NAV & sales-load table, all AMCs</span></div><a class="chip-link" href="https://www.mufap.com.pk/Industry/IndustryStatDaily?tab=3" target="_blank" rel="noopener noreferrer">Open ↗</a></div>
         <div class="li"><div><b>Gold & silver spot</b><br><span class="muted">gold-api.com (USD per troy ounce)</span></div><a class="chip-link" href="https://gold-api.com" target="_blank" rel="noopener noreferrer">Open ↗</a></div>
         <div class="li"><div><b>Exchange rates</b><br><span class="muted">ExchangeRate-API open access (mid-market)</span></div><a class="chip-link" href="https://www.exchangerate-api.com" target="_blank" rel="noopener noreferrer">Open ↗</a></div>
@@ -821,6 +870,15 @@
         sync(); await save(); renderOverview();
       });
     });
+    $('#mk-psxsave', el).onclick = async () => {
+      const v = $('#mk-psxkey', el).value;
+      if (!v) { toast('Enter the passphrase'); return; }
+      await Store.set('psxkey', v);
+      feedData = feedData || {}; delete feedData.psxError;
+      const ok = await loadPsx(true);
+      if (ok) { const n = applyFeed(); await save(); renderAll(); toast(`PSX prices unlocked${n ? ` · ${n} holdings updated` : ''}`); }
+      else { renderData(); toast(feedData.psxError ? 'Wrong passphrase' : 'No encrypted PSX prices on the site yet'); }
+    };
     $('#mk-auto', el).onchange = async e => { m.autoApply = e.target.checked; await save(); };
     $('#mk-refresh', el).onclick = async () => {
       await loadFeed(true);
@@ -829,6 +887,7 @@
       toast(n ? `Updated prices for ${n} holding${n > 1 ? 's' : ''}` : 'Prices loaded — holdings already up to date');
     };
     $('#mk-navs', el).onclick = () => (feedData?.funds ? openNavBrowser() : toast('Fund NAVs are not available yet'));
+    $('#mk-psx', el).onclick = () => (feedData?.psx ? openBrowser('psx') : toast('PSX prices are not available yet'));
     sync();
   }
 
@@ -843,7 +902,9 @@
       if (keep && list.some(x => x.fund === keep)) fundSel.value = keep;
     };
     $('#feed-fx-code').innerHTML = FX_CODES.map(c => `<option>${c}</option>`).join('');
+    $('#feed-psx-list').innerHTML = FD.psxList(feedData).map(x => `<option value="${esc(x.symbol)}">${esc(x.name || x.sector || '')}</option>`).join('');
     const cur = preset || null;
+    $('#feed-psx-sym').value = cur?.type === 'psx' ? cur.symbol : '';
     typeSel.value = cur?.type || '';
     if (cur?.type === 'mufap') {
       const it = FD.findFund(feedData, cur.fund);
@@ -856,6 +917,7 @@
     $('#feed-fx-code').value = cur?.code || 'USD';
     const read = () => {
       const t = typeSel.value;
+      if (t === 'psx') { const sym = $('#feed-psx-sym').value.trim().toUpperCase(); return sym ? { type: 'psx', symbol: sym } : null; }
       if (t === 'mufap') return fundSel.value ? { type: 'mufap', fund: fundSel.value } : null;
       if (t === 'metal') return { type: 'metal', metal: $('#feed-metal-k').value, karat: $('#feed-metal-k').value === 'gold' ? +$('#feed-karat').value : null };
       if (t === 'fx') return { type: 'fx', code: $('#feed-fx-code').value };
@@ -863,6 +925,7 @@
     };
     const preview = () => {
       $('#feed-mufap').hidden = typeSel.value !== 'mufap';
+      $('#feed-psx').hidden = typeSel.value !== 'psx';
       $('#feed-metal').hidden = typeSel.value !== 'metal';
       $('#feed-karat-wrap').hidden = $('#feed-metal-k').value !== 'gold';
       $('#feed-fx').hidden = typeSel.value !== 'fx';
@@ -870,16 +933,20 @@
       const lp = cfg ? FD.priceFor(feedData, cfg, f.unit.value, state.market) : null;
       $('#feed-preview').textContent = !cfg ? (typeSel.value ? '' : 'You will enter prices yourself on the Update tab.')
         : lp ? `Latest: ${qty(lp.price)} per ${(f.unit.value || 'unit').replace(/s$/i, '')} · ${fmtDate(lp.date)} · ${lp.source}`
-        : (cfg.type === 'metal' && !FD.gramsPerUnit(f.unit.value) ? 'Set the unit name to tola, gram, ounce or kg.' : 'No price available right now.');
+        : (cfg.type === 'metal' && !FD.gramsPerUnit(f.unit.value) ? 'Set the unit name to tola, gram, ounce or kg.' : cfg.type === 'psx' && feedData?.psx ? 'Symbol not found in today’s PSX list.' : 'No price available right now.');
+      if (cfg?.type === 'psx' && !f.name.value.trim()) f.name.value = cfg.symbol;
+      if (cfg?.type === 'psx' && !f.symbol.value.trim()) f.symbol.value = cfg.symbol;
       if (cfg?.type === 'mufap' && !f.name.value.trim()) f.name.value = cfg.fund;
     };
     amcSel.onchange = () => { fillFunds(); preview(); };
-    [typeSel, fundSel, $('#feed-metal-k'), $('#feed-karat'), $('#feed-fx-code')].forEach(x => x.onchange = preview);
+    [typeSel, fundSel, $('#feed-metal-k'), $('#feed-karat'), $('#feed-fx-code'), $('#feed-psx-sym')].forEach(x => x.onchange = preview);
+    $('#feed-psx-sym').oninput = () => { if ($('#feed-psx-sym').value.trim().length >= 2) preview(); };
     f.unit.addEventListener('input', preview);
     preview();
     return { read, preview, setDefault: cls => {
       if (typeSel.value) return;
-      typeSel.value = cls === 'mf' && feedData?.funds ? 'mufap' : cls === 'gold' ? 'metal' : cls === 'fx' ? 'fx' : '';
+      typeSel.value = cls === 'psx' ? 'psx' : cls === 'mf' && feedData?.funds ? 'mufap' : cls === 'gold' ? 'metal' : cls === 'fx' ? 'fx' : '';
+      if (cls === 'psx' && !$('#feed-psx-sym').value) $('#feed-psx-sym').value = (f.symbol.value || f.name.value || '').trim().toUpperCase().split(/\s/)[0];
       if (cls === 'fx') f.unit.value = $('#feed-fx-code').value;
       preview();
     } };
@@ -941,7 +1008,29 @@
       f.type.value = (txn && txn.hid === h.id ? txn.type : TYPES[h.mode].some(t => t[0] === prev) ? prev : 'BUY');
       syncType(h);
     };
+    const C = window.Charges;
+    $('#txn-broker').innerHTML = Object.entries(C.BROKERS).map(([k, b]) => `<option value="${k}">${esc(b.name)}</option>`).join('');
+    $('#txn-broker').value = txn?.broker || state.market?.broker || 'psx-minimum';
+    $('#txn-price').value = txn?.price ?? '';
+    const isTrade = h => h && h.cls === 'psx' && h.mode === 'units' && (f.type.value === 'BUY' || f.type.value === 'SELL');
+    const calc = () => {
+      const h = state.holdings.find(x => x.id === f.hid.value);
+      if (!isTrade(h)) return;
+      const qn = num(f.units.value), pr = num($('#txn-price').value);
+      if (!(qn > 0) || !(pr > 0)) { $('#txn-calc').textContent = 'Enter shares and price to work out charges — or type the total from your contract note.'; return; }
+      const c = C.tradeCharges($('#txn-broker').value, f.type.value === 'SELL' ? 'sell' : 'buy', qn, pr);
+      f.amount.value = c.net.toFixed(2);
+      $('#txn-calc').textContent = `Value ${money(c.value)} · commission ${money(c.commission)} · SST ${money(c.taxes)} · CDC/levies ${money(c.other)} → ${f.type.value === 'SELL' ? 'you receive' : 'you pay'} ${money(c.net)}. Estimate — your contract note wins.`;
+    };
+    $('#txn-price').oninput = calc; $('#txn-broker').onchange = calc; f.units.oninput = calc;
+    const syncTrade = h => {
+      const on = isTrade(h);
+      $('#txn-trade').hidden = !on;
+      if (on && !txn && !$('#txn-price').value) { const lp = livePrice(h); if (lp) $('#txn-price').value = +lp.price.toFixed(2); }
+      if (on) calc();
+    };
     const syncType = h => {
+      syncTrade(h);
       const t = f.type.value, u = h.mode === 'units';
       const needUnits = u && (t === 'BUY' || t === 'SELL' || t === 'REINVEST');
       $('#txn-units-wrap').hidden = !needUnits;
@@ -968,6 +1057,7 @@
       e.preventDefault();
       const h = state.holdings.find(x => x.id === f.hid.value);
       const rec = { hid: h.id, date: f.date.value, type: f.type.value, amount: num(f.amount.value) ?? 0, units: $('#txn-units-wrap').hidden ? null : num(f.units.value), note: f.note.value.trim() };
+      if (!$('#txn-trade').hidden && num($('#txn-price').value) > 0) { rec.price = num($('#txn-price').value); rec.broker = $('#txn-broker').value; state.market.broker = rec.broker; }
       if (rec.type === 'SELL' && h.mode === 'units') {
         const s = holdingStats(h);
         const held = s.units + (txn && txn.type === 'SELL' && txn.hid === h.id ? (num(txn.units) || 0) : 0) - (txn && txn.hid === h.id && (txn.type === 'BUY' || txn.type === 'REINVEST') ? (num(txn.units) || 0) : 0);
@@ -1067,7 +1157,7 @@
   const hCls = id => state.holdings.find(h => h.id === id)?.cls || '';
 
   function exportTxCSV() {
-    return F.toCSV(['date', 'holding', 'class', 'type', 'amount', 'units', 'note'],
+    return F.toCSV(['date', 'holding', 'class', 'type', 'amount', 'units', 'note', 'price', 'broker'],
       state.txns.slice().sort(byDate).map(t => ({ ...t, holding: hName(t.hid), class: hCls(t.hid), units: t.units ?? '' })));
   }
   function exportValCSV() {
@@ -1246,7 +1336,7 @@
   }
 
   // ---------- boot ----------
-  const APP_VERSION = '1.2.0';
+  const APP_VERSION = '1.3.0';
   $$('.tabbar button').forEach(b => b.onclick = () => showView(b.dataset.view));
   $('#fab').onclick = () => openTxn();
   // close dialogs by tapping the backdrop

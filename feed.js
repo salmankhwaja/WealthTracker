@@ -55,6 +55,11 @@
       const purity = feedCfg.metal === 'gold' ? (Number(feedCfg.karat) || 24) / 24 : 1;
       return { price: base.perGram * g * purity, date: base.date, source: base.source, stale: base.stale };
     }
+    if (feedCfg.type === 'psx') {
+      const q = data.psx && data.psx.items && data.psx.items[String(feedCfg.symbol || '').toUpperCase().trim()];
+      if (!q || !(q.current > 0)) return null;
+      return { price: q.current, date: data.psx.date, source: 'PSX close', stale: !!data.psx.stale, changePct: q.change_pct };
+    }
     if (feedCfg.type === 'fx') {
       const r = data.fx && data.fx.pkr && data.fx.pkr[feedCfg.code];
       if (!(r > 0)) return null;
@@ -63,12 +68,28 @@
     return null;
   }
 
+  function psxList(data) {
+    const items = (data && data.psx && data.psx.items) || {};
+    return Object.keys(items).sort().map(s => ({ symbol: s, ...items[s] }));
+  }
+
   function amcList(data) {
     const items = (data && data.funds && data.funds.items) || [];
     return [...new Set(items.map(f => f.amc || 'Other'))].sort((a, b) => a.localeCompare(b));
   }
 
-  const api = { priceFor, metalPerGram, findFund, amcList, gramsPerUnit, TOLA_G, OZ_G };
+  /** Decrypts data/psx.enc.json (AES-256-GCM, PBKDF2-SHA256) with the passphrase. Throws on a wrong key. */
+  async function decryptDoc(doc, passphrase, subtle) {
+    subtle = subtle || (root.crypto && root.crypto.subtle);
+    const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+    const base = await subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']);
+    const key = await subtle.deriveKey({ name: 'PBKDF2', salt: unb64(doc.salt), iterations: doc.iterations, hash: 'SHA-256' },
+      base, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+    const pt = await subtle.decrypt({ name: 'AES-GCM', iv: unb64(doc.iv) }, key, unb64(doc.data));
+    return JSON.parse(new TextDecoder().decode(pt));
+  }
+
+  const api = { decryptDoc, priceFor, metalPerGram, findFund, amcList, psxList, gramsPerUnit, TOLA_G, OZ_G };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Feed = api;
 })(typeof self !== 'undefined' ? self : this);

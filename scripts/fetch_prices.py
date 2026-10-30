@@ -9,6 +9,9 @@ Sources
           fallback: fawazahmed0 currency-api    https://github.com/fawazahmed0/exchange-api
   psx     PSX Data Portal market watch (all shares, one request)  https://dps.psx.com.pk/market-watch
           + share names from https://dps.psx.com.pk/symbols (best effort)
+          PSX restricts redistribution of its market data, so PSX prices are fetched ONLY when the
+          repo secret PSX_DATA_KEY is set, and are written ONLY as data/psx.enc.json, encrypted with
+          AES-256-GCM (key = PBKDF2-SHA256 of that passphrase). The app decrypts it on your device.
   fx      open.er-api.com (USD base)            https://open.er-api.com/v6/latest/USD
           fallback: fawazahmed0 currency-api
 
@@ -23,10 +26,15 @@ import json
 import os
 import re
 import sys
+import base64
+import hashlib
+import http.cookiejar
 import urllib.request
 from html.parser import HTMLParser
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "data", "prices.json")
+PSX_OUT = os.path.join(os.path.dirname(__file__), "..", "data", "psx.enc.json")
+PBKDF2_ITER = 310000
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 WealthTracker-price-bot"
 TROY_OZ_G = 31.1034768
 TOLA_G = 11.664
@@ -280,9 +288,53 @@ def pk_session_date(now=None):
     return d.isoformat()
 
 
+_KEY_RE = re.compile(r'window\.__ps\s*=\s*\{[^}]*?"_k"\s*:\s*"([^"]+)"')
+
+
+class PsxSession:
+    """PSX's portal answers data URLs only with its session cookie and the page key (window.__ps._k)
+    sent back as X-Req-Id -- the same approach Day-Trader-PSX uses."""
+
+    def __init__(self):
+        self.opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+        self.key = None
+
+    def _open(self, url, headers, timeout=60):
+        h = dict(BROWSER_HEADERS); h["Accept-Encoding"] = "gzip"; h.update(headers or {})
+        with self.opener.open(urllib.request.Request(url, headers=h), timeout=timeout) as r:
+            raw = r.read()
+            if (r.headers.get("Content-Encoding") or "").lower() == "gzip":
+                import gzip
+                raw = gzip.decompress(raw)
+            return raw.decode("utf-8", "replace")
+
+    def refresh_key(self):
+        for path in ("/", "/company/OGDC"):
+            m = _KEY_RE.search(self._open(PSX_HOST + path, {"Accept": "text/html"}))
+            if m:
+                self.key = m.group(1)
+                return self.key
+        return None
+
+    def get(self, path):
+        for attempt in (0, 1):
+            if attempt or not self.key:
+                self.refresh_key()
+            hdr = {"X-Requested-With": "XMLHttpRequest", "Referer": PSX_HOST + "/",
+                   "Accept": "application/json, text/javascript, text/html, */*; q=0.01"}
+            if self.key:
+                hdr["X-Req-Id"] = self.key
+            try:
+                return self._open(PSX_HOST + path, hdr)
+            except urllib.error.HTTPError as e:
+                if attempt or e.code not in (401, 403, 404, 419):
+                    raise
+
+
 def fetch_psx(errors):
+    sess = PsxSession()
     try:
-        quotes = parse_market_watch(get(PSX_HOST + "/market-watch", timeout=60, headers=BROWSER_HEADERS))
+        quotes = parse_market_watch(sess.get("/market-watch"))
         if len(quotes) < 20:
             raise ValueError(f"only {len(quotes)} quotes parsed")
     except Exception as e:  # noqa: BLE001
@@ -290,7 +342,7 @@ def fetch_psx(errors):
         return None
     names = {}
     try:
-        for x in get_json(PSX_HOST + "/symbols"):
+        for x in json.loads(sess.get("/symbols")):
             if isinstance(x, dict) and x.get("symbol"):
                 names[str(x["symbol"]).upper()] = x.get("name") or ""
     except Exception as e:  # noqa: BLE001
@@ -302,6 +354,23 @@ def fetch_psx(errors):
             items[sym]["name"] = names[sym]
     return {"source": "PSX Data Portal market watch", "url": PSX_HOST + "/market-watch", "fetched": now_iso(),
             "date": pk_session_date(), "count": len(items), "items": items}
+
+
+def encrypt_json(obj, passphrase: str) -> dict:
+    """AES-256-GCM, key from PBKDF2-SHA256 — the same format the app's backups use, decrypted with WebCrypto."""
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    salt, iv = os.urandom(16), os.urandom(12)
+    key = hashlib.pbkdf2_hmac("sha256", passphrase.encode(), salt, PBKDF2_ITER, 32)
+    ct = AESGCM(key).encrypt(iv, json.dumps(obj, separators=(",", ":")).encode(), None)
+    b = lambda x: base64.b64encode(x).decode()
+    return {"format": "pk-wealth-psx", "v": 1, "enc": "AES-256-GCM/PBKDF2-SHA256", "iterations": PBKDF2_ITER,
+            "salt": b(salt), "iv": b(iv), "data": b(ct), "updated": now_iso()}
+
+
+def decrypt_json(doc: dict, passphrase: str):
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    key = hashlib.pbkdf2_hmac("sha256", passphrase.encode(), base64.b64decode(doc["salt"]), doc["iterations"], 32)
+    return json.loads(AESGCM(key).decrypt(base64.b64decode(doc["iv"]), base64.b64decode(doc["data"]), None))
 
 
 # ---------------------------------------------------------------- metals & FX
@@ -346,7 +415,6 @@ def fetch_fx(errors):
 def build(prev: dict) -> dict:
     errors = []
     funds = fetch_funds(errors)
-    psx = fetch_psx(errors)
     metals = fetch_metals(errors)
     fx = fetch_fx(errors)
 
@@ -383,12 +451,6 @@ def build(prev: dict) -> dict:
         elif (prev.get("metals") or {}).get(key):
             out["metals"][key] = {**prev["metals"][key], "stale": True}; stale.append(key)
 
-    # PSX
-    if psx:
-        out["psx"] = psx
-    elif prev.get("psx"):
-        out["psx"] = {**prev["psx"], "stale": True}; stale.append("psx")
-
     # Funds
     if funds:
         out["funds"] = funds
@@ -406,12 +468,26 @@ def main() -> int:
     except (OSError, ValueError):
         prev = {}
     data = build(prev)
+    data.pop("psx", None)  # never publish PSX data in the clear
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
+    key = os.environ.get("PSX_DATA_KEY", "").strip()
+    if key:
+        psx_errors = []
+        psx = fetch_psx(psx_errors)
+        if psx:
+            with open(PSX_OUT, "w", encoding="utf-8") as f:
+                json.dump(encrypt_json(psx, key), f, separators=(",", ":"))
+            data["psx_private"] = {"available": True, "count": psx["count"], "date": psx["date"]}
+        else:
+            data["psx_private"] = {"available": os.path.exists(PSX_OUT), "stale": True}
+        data["errors"] += psx_errors
+    else:
+        data["psx_private"] = {"available": False, "note": "Set the PSX_DATA_KEY repo secret to enable encrypted PSX prices."}
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
     f_ = data.get("funds") or {}
     print(f"funds={f_.get('count')} date={f_.get('latest_date')} usd={((data.get('fx') or {}).get('pkr') or {}).get('USD')} "
-          f"psx={(data.get('psx') or {}).get('count')} gold_tola={(data['metals'].get('gold') or {}).get('pkr_tola')} errors={len(data['errors'])} stale={data['stale']}")
+          f"psx={data.get('psx_private')} gold_tola={(data['metals'].get('gold') or {}).get('pkr_tola')} errors={len(data['errors'])} stale={data['stale']}")
     for e in data["errors"]:
         print("ERROR", json.dumps(e)[:600], file=sys.stderr)
     return 0

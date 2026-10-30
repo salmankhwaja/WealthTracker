@@ -29,8 +29,23 @@ assert q["LUCK"]["change"] == -15 and q["LUCK"]["change_pct"] == -1.5, q
 
 # Stale carry-over when every source fails
 fp.get = lambda *a, **k: (_ for _ in ()).throw(OSError("offline"))
-prev = {"fx": {"pkr": {"USD": 280.0}}, "metals": {"gold": {"pkr_tola": 1}}, "funds": {"count": 3, "items": items}, "psx": {"count": 2, "items": q}}
+prev = {"fx": {"pkr": {"USD": 280.0}}, "metals": {"gold": {"pkr_tola": 1}}, "funds": {"count": 3, "items": items}}
 out = fp.build(prev)
 assert out["fx"]["stale"] and out["funds"]["stale"] and out["metals"]["gold"]["stale"], out
-assert set(out["stale"]) == {"fx", "gold", "funds", "psx"}, out["stale"]
+assert set(out["stale"]) == {"fx", "gold", "funds"}, out["stale"]
+assert "psx" not in out
+
+# Encryption round trip; a sample is written for the app's Node decrypt test
+try:
+    import cryptography  # noqa: F401
+    doc = fp.encrypt_json({"date": "2026-10-30", "items": {"OGDC": {"current": 253.5}}}, "correct horse")
+    assert fp.decrypt_json(doc, "correct horse")["items"]["OGDC"]["current"] == 253.5
+    try:
+        fp.decrypt_json(doc, "wrong"); raise SystemExit("decrypt with wrong key should fail")
+    except Exception as e:
+        assert "should fail" not in str(e)
+    import json as _j
+    _j.dump(doc, open(os.path.join(os.path.dirname(__file__), "fixtures", "psx_sample.enc.json"), "w"))
+except ImportError:
+    print("(cryptography not installed: skipped encryption test)")
 print("All fetch_prices tests passed.")

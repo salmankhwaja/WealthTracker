@@ -27,4 +27,19 @@ assert.strictEqual(FD.priceFor(data, { type: 'metal', metal: 'gold' }, 'bars', s
 // fx
 close(FD.priceFor(data, { type: 'fx', code: 'USD' }, 'USD', spot).price, 280);
 assert.deepStrictEqual(FD.amcList(data), ['NBP']);
-console.log('All feed tests passed.');
+// PSX close by symbol (case-insensitive)
+const d2 = { ...data, psx: { date: '2026-10-30', items: { OGDC: { current: 253.5, change_pct: 1.36, name: 'Oil & Gas Development' } } } };
+p = FD.priceFor(d2, { type: 'psx', symbol: 'ogdc' }, 'shares', spot);
+close(p.price, 253.5); assert.strictEqual(p.date, '2026-10-30'); close(p.changePct, 1.36);
+assert.strictEqual(FD.priceFor(d2, { type: 'psx', symbol: 'NOPE' }, 'shares', spot), null);
+assert.deepStrictEqual(FD.psxList(d2).map(x => x.symbol), ['OGDC']);
+// Decrypt the sample the Python fetcher encrypted (same format as the live data/psx.enc.json)
+const fs = require('fs'), path = require('path');
+const doc = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'psx_sample.enc.json'), 'utf8'));
+(async () => {
+  const subtle = require('crypto').webcrypto.subtle;
+  const out = await FD.decryptDoc(doc, 'correct horse', subtle);
+  close(out.items.OGDC.current, 253.5);
+  await assert.rejects(FD.decryptDoc(doc, 'wrong', subtle));
+  console.log('All feed tests passed.');
+})().catch(e => { console.error(e); process.exit(1); });

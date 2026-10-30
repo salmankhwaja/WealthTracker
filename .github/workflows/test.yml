@@ -12,6 +12,7 @@ jobs:
       - run: node tests/finance.test.js
       - run: node tests/zakat.test.js
       - run: node tests/feed.test.js
+      - run: node tests/charges.test.js
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: python3 tests/test_fetch_prices.py
