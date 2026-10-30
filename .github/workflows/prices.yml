@@ -1,0 +1,36 @@
+name: prices
+# Downloads public prices (MUFAP NAVs, gold/silver spot, FX) into data/prices.json.
+# The app reads that file from the same GitHub Pages site; no user data is involved.
+on:
+  schedule:
+    - cron: "13 5 * * *"    # 10:13 PKT
+    - cron: "13 11 * * *"   # 16:13 PKT
+    - cron: "43 17 * * *"   # 22:43 PKT, after most AMCs publish NAVs
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["scripts/fetch_prices.py", ".github/workflows/prices.yml"]
+permissions:
+  contents: write
+concurrency:
+  group: prices
+  cancel-in-progress: false
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python3 tests/test_fetch_prices.py
+      - run: python3 scripts/fetch_prices.py
+      - name: Commit if changed
+        run: |
+          git config user.name "price-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/prices.json
+          if git diff --cached --quiet; then echo "no changes"; exit 0; fi
+          git commit -m "prices: $(date -u +%Y-%m-%dT%H:%MZ)"
+          for i in 1 2 3; do git pull --rebase -q origin main && git push && exit 0; sleep 5; done
+          exit 1
