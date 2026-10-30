@@ -3,3 +3,4 @@
 !manifest.webmanifest
 .DS_Store
 node_modules/
+!data/prices.json
