@@ -44,8 +44,10 @@ try:
         fp.decrypt_json(doc, "wrong"); raise SystemExit("decrypt with wrong key should fail")
     except Exception as e:
         assert "should fail" not in str(e)
-    import json as _j
-    _j.dump(doc, open(os.path.join(os.path.dirname(__file__), "fixtures", "psx_sample.enc.json"), "w"))
+    fx_path = os.path.join(os.path.dirname(__file__), "fixtures", "psx_sample.enc.json")
+    if not os.path.exists(fx_path):  # sample for the Node decrypt test; written once, then committed
+        import json as _j
+        _j.dump(doc, open(fx_path, "w"))
 except ImportError:
     print("(cryptography not installed: skipped encryption test)")
 print("All fetch_prices tests passed.")

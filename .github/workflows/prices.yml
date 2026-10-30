@@ -36,5 +36,5 @@ jobs:
           if [ -f data/psx.enc.json ]; then git add data/psx.enc.json; fi
           if git diff --cached --quiet; then echo "no changes"; exit 0; fi
           git commit -m "prices: $(date -u +%Y-%m-%dT%H:%MZ)"
-          for i in 1 2 3; do git pull --rebase -q origin main && git push && exit 0; sleep 5; done
+          for i in 1 2 3; do git pull --rebase --autostash -q origin main && git push && exit 0; sleep 5; done
           exit 1
