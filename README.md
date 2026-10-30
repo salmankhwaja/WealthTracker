@@ -28,6 +28,28 @@ There are no accounts, servers or trackers. The data lives in the browser on you
 - **Works offline** through a service worker. Light and dark themes are supported.
 - **Strict Content-Security-Policy.** No third-party code is loaded.
 
+## Live prices
+
+A GitHub Action (`.github/workflows/prices.yml`) runs `scripts/fetch_prices.py` three times a day and commits `data/prices.json`. The app reads that file from its own site, so no personal data is sent anywhere, and it works offline from the last copy.
+
+| Data | Source | Notes |
+|---|---|---|
+| Mutual fund NAVs, all AMCs (NBP, Al Meezan, ABL, HBL, MCB, UBL, Alfalah…) | [MUFAP daily NAV table](https://www.mufap.com.pk/Industry/IndustryStatDaily?tab=3) | NAV, offer, repurchase, validity date |
+| Gold & silver | [gold-api.com](https://gold-api.com) spot (USD/oz) × USD/PKR | Fallback: fawazahmed0 currency-api |
+| USD, EUR, GBP, AED, SAR, CNY → PKR | [ExchangeRate-API open access](https://www.exchangerate-api.com) | Mid-market rate |
+
+In the app:
+
+- **Link a holding** (Edit holding → Auto price) to a MUFAP fund, gold or silver (24/22/21/18K, unit in tola, gram, ounce or kg), or a currency.
+- **Browse fund NAVs** from the Overview's *Market today* card and tap **Track** to add a fund.
+- **Automatic updates.** Linked holdings get a dated price when the app opens. A price you typed yourself is never overwritten. You can switch this off on the Data tab.
+- **Gold rate choice** (Data tab):
+  - International spot, optionally with a local premium %.
+  - Your own rate, for example the Sarafa rate.
+- **Zakat → Use market rates** fills gold and silver for nisab.
+
+TradingView is deliberately not used: its terms license prices for on-screen display only and prohibit automated processing.
+
 ## XIRR vs CAGR
 
 - **XIRR** weights every cash flow by its date. Use it whenever you invested in instalments (SIPs), topped up or withdrew money.
@@ -119,6 +141,9 @@ index.html            app shell and dialogs
 app.js                UI, storage, import/export, encryption
 finance.js            XIRR, CAGR and CSV helpers (pure, tested)
 zakat.js              Zakat / nisab calculation (pure, tested)
+feed.js               maps data/prices.json to holding prices (pure, tested)
+scripts/              price fetcher run by GitHub Actions
+data/prices.json      latest public prices (written by the Action)
 styles.css            mobile-first styles, light/dark
 sw.js                 offline cache
 manifest.webmanifest  install metadata

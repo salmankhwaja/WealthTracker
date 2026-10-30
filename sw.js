@@ -1,6 +1,6 @@
 // Service worker: caches the app shell so it opens offline. Bump VERSION on every release.
-const VERSION = 'pkw-v1.1.0';
-const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'finance.js', 'zakat.js', 'manifest.webmanifest',
+const VERSION = 'pkw-v1.2.0';
+const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'finance.js', 'zakat.js', 'feed.js', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-192.png', 'icons/maskable-512.png'];
 
 self.addEventListener('install', e => {

@@ -79,6 +79,27 @@
         </select>
       </label>
       <label id="holding-unit-wrap">Unit name <input type="text" name="unit" maxlength="20" placeholder="shares / units / tola / gram"></label>
+      <fieldset id="feed-wrap" class="feed-box">
+        <legend>Auto price</legend>
+        <label>Source
+          <select id="feed-type">
+            <option value="">None — I'll enter prices</option>
+            <option value="mufap">Mutual fund NAV (MUFAP)</option>
+            <option value="metal">Gold / silver rate</option>
+            <option value="fx">Exchange rate</option>
+          </select>
+        </label>
+        <div id="feed-mufap">
+          <label>AMC <select id="feed-amc"></select></label>
+          <label>Fund <select id="feed-fund"></select></label>
+        </div>
+        <div id="feed-metal">
+          <label>Metal <select id="feed-metal-k"><option value="gold">Gold</option><option value="silver">Silver</option></select></label>
+          <label id="feed-karat-wrap">Purity <select id="feed-karat"><option value="24">24K</option><option value="22">22K</option><option value="21">21K</option><option value="18">18K</option></select></label>
+        </div>
+        <div id="feed-fx"><label>Currency <select id="feed-fx-code"></select></label></div>
+        <p class="hint" id="feed-preview"></p>
+      </fieldset>
       <label>Notes <input type="text" name="notes" maxlength="200" autocomplete="off"></label>
       <div class="actions">
         <button type="button" class="ghost" data-close>Cancel</button>
@@ -90,6 +111,17 @@
   <!-- Holding detail -->
   <dialog id="dlg-detail" class="sheet">
     <div id="detail-body"></div>
+  </dialog>
+
+  <!-- Fund NAV browser -->
+  <dialog id="dlg-navs" class="sheet">
+    <div class="nav-body">
+      <div class="detail-head"><h2>Fund NAVs</h2><button class="x" data-close aria-label="Close">×</button></div>
+      <p class="muted small" id="nav-meta"></p>
+      <input type="search" id="nav-q" placeholder="Search fund, AMC or category" autocomplete="off">
+      <select id="nav-amc"></select>
+      <div class="list-mini" id="nav-list"></div>
+    </div>
   </dialog>
 
   <!-- Zakat payment -->
@@ -126,6 +158,7 @@
 
   <script src="finance.js"></script>
   <script src="zakat.js"></script>
+  <script src="feed.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

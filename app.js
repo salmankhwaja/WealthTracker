@@ -9,6 +9,7 @@
     mf:    { label: 'Mutual Funds', mode: 'units', unit: 'units' },
     bank:  { label: 'Bank Savings', mode: 'value', unit: '' },
     gold:  { label: 'Gold',         mode: 'units', unit: 'tola' },
+    fx:    { label: 'Foreign Currency', mode: 'units', unit: 'USD' },
     other: { label: 'Other',        mode: 'value', unit: '' },
   };
   // Internal transaction types. Labels depend on how the holding is tracked.
@@ -206,6 +207,7 @@
         <div class="alloc" id="alloc">${classKeys.map(k => `<span class="bg-${k}" data-w="${total.value ? byClass[k].agg.value / total.value : 0}"></span>`).join('')}</div>
         <div class="legend">${classKeys.map(k => `<span><i class="dot bg-${k}"></i>${CLASSES[k].label} ${total.value ? Math.round(byClass[k].agg.value / total.value * 100) : 0}%</span>`).join('')}</div>
       </div>
+      ${marketCardHTML()}
       ${stale ? `<div class="note">${stale} holding${stale > 1 ? 's have' : ' has'} a price or balance older than ${STALE_DAYS} days, so returns may be off. <button class="link" data-goto="update">Update now</button></div>` : ''}
       <h3>By asset class</h3>
       ${classKeys.map(k => {
@@ -222,7 +224,7 @@
     `;
     $$('#alloc span', el).forEach(s => { s.style.width = (parseFloat(s.dataset.w) * 100) + '%'; });
     $$('[data-class]', el).forEach(r => r.onclick = () => { showView('holdings'); });
-    $$('[data-goto]', el).forEach(b => b.onclick = () => showView(b.dataset.goto));
+    wireMarketCard(el);
   }
 
   function renderHoldings() {
@@ -260,6 +262,7 @@
         <h2>Update prices & balances</h2>
         <p class="info">Enter today's NAV, share price, gold rate per unit, or bank balance. Leave a field unchanged to skip it.</p>
         <div class="date-row"><span class="muted small">As of</span><input type="date" id="upd-date" value="${today()}"></div>
+        ${linked().length ? `<button class="ghost block gap-top" id="upd-fill">Fill ${linked().length} linked holding${linked().length > 1 ? 's' : ''} from latest prices</button>` : '<p class="info small">Tip: link a holding to a MUFAP fund, gold or a currency (Edit holding → Auto price) to fill prices automatically.</p>'}
       </div>
       ${Object.keys(CLASSES).map(k => {
         const list = active.filter(s => s.h.cls === k);
@@ -267,7 +270,7 @@
         return `<h3><i class="dot bg-${k}"></i>${CLASSES[k].label}</h3><div class="card">${list.map(s => {
           const cur = s.h.mode === 'units' ? s.price : s.value;
           return `<div class="row"><div class="name">${esc(s.h.name)}
-              <div class="sub">${s.h.mode === 'units' ? `${qty(s.units)} ${esc(s.h.unit || '')} · price` : 'balance'} last set ${fmtDate(s.valDate)}</div></div>
+              <div class="sub">${s.h.mode === 'units' ? `${qty(s.units)} ${esc(s.h.unit || '')} · price` : 'balance'} last set ${fmtDate(s.valDate)}${s.h.feed ? ' · <span class="auto-tag">auto</span>' : ''}</div></div>
             <input type="number" step="any" min="0" inputmode="decimal" data-upd="${s.h.id}" data-orig="${cur ?? ''}" value="${cur != null ? +(+cur).toFixed(4) : ''}" aria-label="${esc(s.h.name)}">
           </div>`;
         }).join('')}</div>`;
@@ -291,6 +294,16 @@
       toast(n ? `Saved ${n} update${n > 1 ? 's' : ''}` : 'Nothing changed — edit a field first');
     };
     const stale = $$('[data-upd]', el);
+    if ($('#upd-fill')) $('#upd-fill').onclick = async () => {
+      await loadFeed(true);
+      let n = 0;
+      for (const inp of $$('[data-upd]', el)) {
+        const h = state.holdings.find(x => x.id === inp.dataset.upd);
+        const lp = h && livePrice(h);
+        if (lp && lp.price > 0) { inp.value = +lp.price.toFixed(4); inp.dataset.dirty = '1'; n++; }
+      }
+      toast(n ? `Filled ${n} price${n > 1 ? 's' : ''} — review, then Save` : 'No live prices available right now');
+    };
     $('#upd-same').onclick = () => { stale.forEach(i => { if (i.value !== '') i.dataset.dirty = '1'; }); $('#upd-save').click(); };
   }
 
@@ -306,6 +319,8 @@
         Last change: ${state.meta.updated ? new Date(state.meta.updated).toLocaleString() : '—'}.</p>
         ${persisted === false ? '<button class="chip" id="d-persist">Protect storage</button>' : ''}
       </div>
+      <h3>Market prices & sources</h3>
+      <div id="mkt-settings">${marketSettingsHTML()}</div>
       <h3>Backup & move between devices</h3>
       <div class="card">
         <p class="info">One encrypted file holds everything. Restore it on another phone or PC to carry on there. Put it in a Syncthing folder or cloud drive — only ciphertext leaves the device.</p>
@@ -330,6 +345,7 @@
       <div class="card"><button class="danger" id="d-wipe">Erase all data on this device</button></div>
       <p class="info small">PK Wealth ${APP_VERSION} · open source · no accounts, no servers, no trackers.</p>
     `;
+    wireMarketSettings($('#mkt-settings'));
     $('#d-backup').onclick = () => backup(false);
     $('#d-restore').onclick = () => pickFile('json');
     if ($('#d-share')) $('#d-share').onclick = () => backup(true);
@@ -352,7 +368,7 @@
 
   function renderAll() {
     $('#asof').textContent = fmtDate(today());
-    normalizeZakat();
+    normalizeZakat(); normalizeMarket();
     renderOverview(); renderHoldings(); renderUpdate(); renderData();
     if (!$('#view-zakat').contains(document.activeElement)) renderZakat();
     $('#fab').hidden = !state.holdings.length;
@@ -465,7 +481,8 @@
           ${field('goldRate', `Gold price per ${unit} (PKR)`, st.goldRate, derivedGold ? `placeholder="${Math.round(derivedGold)} (from your gold holding)"` : 'placeholder="today’s rate"')}
           ${field('silverRate', `Silver price per ${unit} (PKR)`, st.silverRate, 'placeholder="today’s rate"')}
         </div>
-        <p class="info small">Use today's rates from your jeweller or the Sarafa association.</p>
+        <button class="ghost block" id="zk-mkt">Use market rates (${state.market?.gold?.source === 'manual' ? 'your rate' : 'spot'})</button>
+        <p class="info small">Fills 24K gold and silver from the Market settings on the Data tab. Check against your jeweller or Sarafa rate.</p>
       </div>
 
       <h3>From your portfolio</h3>
@@ -537,6 +554,14 @@
     $$('[data-inc-pct]', el).forEach(c => c.addEventListener('input', () => {
       (st.include[c.dataset.incPct] ||= {}).pct = c.value; zkPersist(); updateZakatResult();
     }));
+    $('#zk-mkt').onclick = () => {
+      const g = FD.metalPerGram(feedData, 'gold', state.market), sv = FD.metalPerGram(feedData, 'silver', state.market);
+      if (!g && !sv) { toast('Market rates not available yet'); return; }
+      const per = st.rateUnit === 'tola' ? FD.TOLA_G : 1;
+      if (g) st.goldRate = String(Math.round(g.perGram * per * 100) / 100);
+      if (sv) st.silverRate = String(Math.round(sv.perGram * per * 100) / 100);
+      zkPersist(); renderZakat(); toast('Rates filled');
+    };
     $('#zk-c-add').onclick = async () => {
       const name = $('#zk-c-name').value.trim(), url = $('#zk-c-url').value.trim();
       if (!name) { toast('Enter a name'); return; }
@@ -662,30 +687,233 @@
     closeOn(dlg); dlg.showModal();
   }
 
+  // ---------- Market prices (data/prices.json, refreshed by a GitHub Action) ----------
+  const FD = window.Feed;
+  const FX_CODES = ['USD', 'EUR', 'GBP', 'AED', 'SAR', 'CNY'];
+  let feedData = null;
+  const emptyMarket = () => ({ gold: { source: 'spot', premiumPct: '', manualTola: '', manualDate: '' }, silver: { source: 'spot', premiumPct: '', manualTola: '', manualDate: '' }, navField: 'nav', autoApply: true });
+  function normalizeMarket() {
+    const e = emptyMarket();
+    state.market = { ...e, ...(state.market || {}) };
+    state.market.gold = { ...e.gold, ...(state.market.gold || {}) };
+    state.market.silver = { ...e.silver, ...(state.market.silver || {}) };
+  }
+  async function loadFeed(force) {
+    try {
+      const r = await fetch('data/prices.json', { cache: force ? 'no-store' : 'no-cache' });
+      if (r.ok) { feedData = await r.json(); try { await Store.set('feed', feedData); } catch { } }
+    } catch { }
+    if (!feedData) { try { feedData = (await Store.get('feed')) || null; } catch { } }
+    return feedData;
+  }
+  const linked = () => state.holdings.filter(h => h.feed && h.mode === 'units');
+  const livePrice = h => (h.feed ? FD.priceFor(feedData, h.feed, h.unit, state.market) : null);
+
+  /** Adds a dated price for every linked holding from the feed. Returns number of holdings updated. */
+  function applyFeed() {
+    if (!feedData) return 0;
+    let n = 0;
+    const t = today();
+    for (const h of linked()) {
+      const lp = livePrice(h);
+      if (!lp || !(lp.price > 0) || !lp.date) continue;
+      const date = lp.date > t ? t : lp.date;
+      const same = state.vals.find(v => v.hid === h.id && v.date === date);
+      if (same && !same.auto) continue;                       // never overwrite a price the user typed
+      if (same && Math.abs(+same.price - lp.price) < 1e-9) continue;
+      const newer = state.vals.some(v => v.hid === h.id && v.date > date && !v.auto);
+      if (newer) continue;
+      state.vals = state.vals.filter(v => v !== same);
+      state.vals.push({ id: uid(), hid: h.id, date, price: +lp.price.toFixed(6), auto: true, src: lp.source });
+      n++;
+    }
+    return n;
+  }
+
+  function ago(iso) {
+    if (!iso) return '—';
+    const m = Math.round((Date.now() - Date.parse(iso)) / 60000);
+    if (m < 60) return m + ' min ago';
+    if (m < 48 * 60) return Math.round(m / 60) + ' h ago';
+    return Math.round(m / 1440) + ' days ago';
+  }
+
+  function marketCardHTML() {
+    if (!feedData) return `<div class="card mkt"><div class="class-head"><span class="t">Market today</span></div><p class="info small">Live prices aren't available yet. They load from this site once it's online.</p></div>`;
+    const g = FD.metalPerGram(feedData, 'gold', state.market), sv = FD.metalPerGram(feedData, 'silver', state.market);
+    const usd = feedData.fx?.pkr?.USD;
+    const st = k => (feedData.stale || []).includes(k) ? ' <span class="badge">stale</span>' : '';
+    return `<div class="card mkt">
+      <div class="class-head"><span class="t">Market today</span><span class="muted small">updated ${ago(feedData.updated)}</span></div>
+      <div class="kpis mkt-kpis">
+        <div class="kpi"><div class="k">USD / PKR${st('fx')}</div><div class="v">${usd ? qty(usd) : '—'}</div></div>
+        <div class="kpi"><div class="k">Gold 24K / tola${st('gold')}</div><div class="v">${g ? money(g.perGram * FD.TOLA_G) : '—'}</div></div>
+        <div class="kpi"><div class="k">Silver / tola${st('silver')}</div><div class="v">${sv ? money(sv.perGram * FD.TOLA_G) : '—'}</div></div>
+        <div class="kpi"><div class="k">Fund NAVs${st('funds')}</div><div class="v small-v">${feedData.funds ? feedData.funds.count + ' · ' + fmtDate(feedData.funds.latest_date) : 'unavailable'}</div></div>
+      </div>
+      <p class="info small">${g ? 'Gold: ' + esc(g.source) + '. ' : ''}<button class="link" data-goto="data">Sources & settings</button>${feedData.funds ? ' · <button class="link" id="mkt-navs">Browse fund NAVs</button>' : ''}</p>
+    </div>`;
+  }
+
+  function wireMarketCard(el) {
+    $$('[data-goto]', el).forEach(b => b.onclick = () => showView(b.dataset.goto));
+    if ($('#mkt-navs', el)) $('#mkt-navs', el).onclick = () => openNavBrowser();
+  }
+
+  function openNavBrowser() {
+    const dlg = $('#dlg-navs');
+    const items = feedData?.funds?.items || [];
+    $('#nav-amc').innerHTML = '<option value="">All AMCs</option>' + FD.amcList(feedData).map(a => `<option>${esc(a)}</option>`).join('');
+    $('#nav-meta').textContent = feedData?.funds ? `${feedData.funds.count} funds from MUFAP · latest ${fmtDate(feedData.funds.latest_date)}` : '';
+    const draw = () => {
+      const q = $('#nav-q').value.trim().toLowerCase(), amc = $('#nav-amc').value;
+      const list = items.filter(f => (!amc || (f.amc || 'Other') === amc) && (!q || (f.fund + ' ' + f.category + ' ' + f.amc).toLowerCase().includes(q)));
+      const tracked = new Set(state.holdings.filter(h => h.feed?.type === 'mufap').map(h => h.feed.fund.toLowerCase()));
+      $('#nav-list').innerHTML = list.slice(0, 150).map((f, i) => `<div class="li"><div><b>${esc(f.fund)}</b><br><span class="muted">${esc(f.category || '')}${f.amc ? ' · ' + esc(f.amc) : ''}</span></div>
+        <div class="right"><b>${qty(f.nav)}</b><br><span class="muted small">${fmtDate(f.date)}</span><br>${tracked.has(f.fund.toLowerCase()) ? '<span class="muted small">tracked</span>' : `<button class="link" data-track="${esc(f.fund)}">Track</button>`}</div></div>`).join('')
+        + (list.length > 150 ? `<p class="muted small">Showing 150 of ${list.length} — refine the search.</p>` : '') + (list.length ? '' : '<p class="muted">No matching funds.</p>');
+      $$('[data-track]', $('#nav-list')).forEach(b => b.onclick = () => {
+        dlg.close();
+        openHolding(null, null, { name: b.dataset.track, cls: 'mf', feed: { type: 'mufap', fund: b.dataset.track } });
+      });
+    };
+    $('#nav-q').oninput = draw; $('#nav-amc').onchange = draw; $('#nav-q').value = '';
+    draw(); closeOn(dlg); dlg.showModal();
+  }
+
+  function marketSettingsHTML() {
+    const m = state.market;
+    const metal = (k, label) => `<div class="mkt-set">
+        <label class="zk-field">${label} rate source
+          <select data-mk="${k}.source"><option value="spot">International spot (gold-api.com) × USD/PKR</option><option value="manual">My own rate (e.g. local Sarafa)</option></select></label>
+        <div data-show="${k}.spot"><label class="zk-field">Local premium over spot (%)<input type="number" step="any" inputmode="decimal" data-mk="${k}.premiumPct" value="${esc(m[k].premiumPct)}" placeholder="0"></label></div>
+        <div data-show="${k}.manual"><label class="zk-field">${label} 24K price per tola (PKR)<input type="number" step="any" min="0" inputmode="decimal" data-mk="${k}.manualTola" value="${esc(m[k].manualTola)}"></label></div>
+      </div>`;
+    return `<div class="card">
+        <p class="info">Prices refresh three times a day on this site from public sources, then load on your phone. No personal data is sent anywhere.</p>
+        <label class="zk-check"><input type="checkbox" id="mk-auto" ${m.autoApply ? 'checked' : ''}><span>Update linked holdings automatically when the app opens</span></label>
+        <div class="btn-grid gap-top"><button class="primary" id="mk-refresh">Refresh & apply now</button><button class="ghost" id="mk-navs">Browse fund NAVs</button></div>
+      </div>
+      <div class="card">
+        ${metal('gold', 'Gold')}
+        ${metal('silver', 'Silver')}
+        <label class="zk-field">Mutual fund price to use
+          <select data-mk="navField"><option value="nav">NAV</option><option value="repurchase">Repurchase (what you'd get on redemption)</option></select></label>
+      </div>
+      <div class="card list-mini">
+        <div class="li"><div><b>Mutual fund NAVs</b><br><span class="muted">MUFAP daily NAV & sales-load table, all AMCs</span></div><a class="chip-link" href="https://www.mufap.com.pk/Industry/IndustryStatDaily?tab=3" target="_blank" rel="noopener noreferrer">Open ↗</a></div>
+        <div class="li"><div><b>Gold & silver spot</b><br><span class="muted">gold-api.com (USD per troy ounce)</span></div><a class="chip-link" href="https://gold-api.com" target="_blank" rel="noopener noreferrer">Open ↗</a></div>
+        <div class="li"><div><b>Exchange rates</b><br><span class="muted">ExchangeRate-API open access (mid-market)</span></div><a class="chip-link" href="https://www.exchangerate-api.com" target="_blank" rel="noopener noreferrer">Open ↗</a></div>
+        <p class="muted small">TradingView isn't used: its terms allow its prices for on-screen display only, not for apps that process them. Spot gold is the international price; local Sarafa rates are usually higher — set a premium or enter your own rate.</p>
+      </div>`;
+  }
+
+  function wireMarketSettings(el) {
+    const m = state.market;
+    const sync = () => {
+      for (const k of ['gold', 'silver']) $$(`[data-show^="${k}."]`, el).forEach(d => { d.hidden = d.dataset.show !== `${k}.${m[k].source}`; });
+    };
+    $$('[data-mk]', el).forEach(inp => {
+      const [a, b] = inp.dataset.mk.split('.');
+      inp.value = b ? m[a][b] : m[a];
+      inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input', async () => {
+        if (b) { m[a][b] = inp.value; if (b === 'manualTola') m[a].manualDate = today(); } else m[a] = inp.value;
+        sync(); await save(); renderOverview();
+      });
+    });
+    $('#mk-auto', el).onchange = async e => { m.autoApply = e.target.checked; await save(); };
+    $('#mk-refresh', el).onclick = async () => {
+      await loadFeed(true);
+      if (!feedData) { toast('Could not load prices — check your connection'); return; }
+      const n = applyFeed(); await save(); renderAll();
+      toast(n ? `Updated prices for ${n} holding${n > 1 ? 's' : ''}` : 'Prices loaded — holdings already up to date');
+    };
+    $('#mk-navs', el).onclick = () => (feedData?.funds ? openNavBrowser() : toast('Fund NAVs are not available yet'));
+    sync();
+  }
+
+  // Holding dialog: link to a price feed
+  function setupFeedPicker(f, preset) {
+    const typeSel = $('#feed-type'), amcSel = $('#feed-amc'), fundSel = $('#feed-fund');
+    const fundsBy = amc => (feedData?.funds?.items || []).filter(x => !amc || (x.amc || 'Other') === amc);
+    amcSel.innerHTML = '<option value="">All AMCs</option>' + FD.amcList(feedData).map(a => `<option>${esc(a)}</option>`).join('');
+    const fillFunds = keep => {
+      const list = fundsBy(amcSel.value);
+      fundSel.innerHTML = list.length ? list.map(x => `<option>${esc(x.fund)}</option>`).join('') : '<option value="">(no fund list loaded yet)</option>';
+      if (keep && list.some(x => x.fund === keep)) fundSel.value = keep;
+    };
+    $('#feed-fx-code').innerHTML = FX_CODES.map(c => `<option>${c}</option>`).join('');
+    const cur = preset || null;
+    typeSel.value = cur?.type || '';
+    if (cur?.type === 'mufap') {
+      const it = FD.findFund(feedData, cur.fund);
+      amcSel.value = it ? (it.amc || 'Other') : '';
+      fillFunds(it ? it.fund : cur.fund);
+      if (!it && cur.fund) fundSel.innerHTML = `<option>${esc(cur.fund)}</option>` + fundSel.innerHTML, fundSel.value = cur.fund;
+    } else fillFunds();
+    $('#feed-metal-k').value = cur?.metal || 'gold';
+    $('#feed-karat').value = String(cur?.karat || 24);
+    $('#feed-fx-code').value = cur?.code || 'USD';
+    const read = () => {
+      const t = typeSel.value;
+      if (t === 'mufap') return fundSel.value ? { type: 'mufap', fund: fundSel.value } : null;
+      if (t === 'metal') return { type: 'metal', metal: $('#feed-metal-k').value, karat: $('#feed-metal-k').value === 'gold' ? +$('#feed-karat').value : null };
+      if (t === 'fx') return { type: 'fx', code: $('#feed-fx-code').value };
+      return null;
+    };
+    const preview = () => {
+      $('#feed-mufap').hidden = typeSel.value !== 'mufap';
+      $('#feed-metal').hidden = typeSel.value !== 'metal';
+      $('#feed-karat-wrap').hidden = $('#feed-metal-k').value !== 'gold';
+      $('#feed-fx').hidden = typeSel.value !== 'fx';
+      const cfg = read();
+      const lp = cfg ? FD.priceFor(feedData, cfg, f.unit.value, state.market) : null;
+      $('#feed-preview').textContent = !cfg ? (typeSel.value ? '' : 'You will enter prices yourself on the Update tab.')
+        : lp ? `Latest: ${qty(lp.price)} per ${(f.unit.value || 'unit').replace(/s$/i, '')} · ${fmtDate(lp.date)} · ${lp.source}`
+        : (cfg.type === 'metal' && !FD.gramsPerUnit(f.unit.value) ? 'Set the unit name to tola, gram, ounce or kg.' : 'No price available right now.');
+      if (cfg?.type === 'mufap' && !f.name.value.trim()) f.name.value = cfg.fund;
+    };
+    amcSel.onchange = () => { fillFunds(); preview(); };
+    [typeSel, fundSel, $('#feed-metal-k'), $('#feed-karat'), $('#feed-fx-code')].forEach(x => x.onchange = preview);
+    f.unit.addEventListener('input', preview);
+    preview();
+    return { read, preview, setDefault: cls => {
+      if (typeSel.value) return;
+      typeSel.value = cls === 'mf' && feedData?.funds ? 'mufap' : cls === 'gold' ? 'metal' : cls === 'fx' ? 'fx' : '';
+      if (cls === 'fx') f.unit.value = $('#feed-fx-code').value;
+      preview();
+    } };
+  }
+
   // ---------- dialogs ----------
   function closeOn(dlg) { $$('[data-close]', dlg).forEach(b => b.onclick = () => dlg.close()); }
 
   let editingHolding = null;
-  function openHolding(h = null, afterSave) {
+  function openHolding(h = null, afterSave, preset = null) {
     editingHolding = h;
     const dlg = $('#dlg-holding'), f = $('#form-holding');
     $('#holding-title').textContent = h ? 'Edit holding' : 'New holding';
     $('#holding-cls').innerHTML = Object.entries(CLASSES).map(([k, c]) => `<option value="${k}">${c.label}</option>`).join('');
     f.reset();
-    f.name.value = h?.name || ''; f.cls.value = h?.cls || 'psx'; f.symbol.value = h?.symbol || '';
-    f.mode.value = h?.mode || CLASSES[f.cls.value].mode; f.unit.value = h?.unit ?? CLASSES[f.cls.value].unit; f.notes.value = h?.notes || '';
+    const src = h || preset || {};
+    f.name.value = src.name || ''; f.cls.value = src.cls || 'psx'; f.symbol.value = src.symbol || '';
+    f.mode.value = src.mode || CLASSES[f.cls.value].mode; f.unit.value = src.unit ?? CLASSES[f.cls.value].unit; f.notes.value = src.notes || '';
     f.mode.disabled = !!(h && state.txns.some(t => t.hid === h.id));
-    const syncUnit = () => { $('#holding-unit-wrap').hidden = f.mode.value !== 'units'; };
-    f.cls.onchange = () => { if (!f.mode.disabled) f.mode.value = CLASSES[f.cls.value].mode; f.unit.value = CLASSES[f.cls.value].unit; syncUnit(); };
+    const picker = setupFeedPicker(f, src.feed);
+    const syncUnit = () => { $('#holding-unit-wrap').hidden = f.mode.value !== 'units'; $('#feed-wrap').hidden = f.mode.value !== 'units'; };
+    f.cls.onchange = () => { if (!f.mode.disabled) f.mode.value = CLASSES[f.cls.value].mode; f.unit.value = CLASSES[f.cls.value].unit; syncUnit(); picker.setDefault(f.cls.value); picker.preview(); };
     f.mode.onchange = syncUnit; syncUnit();
+    if (!h && !preset) picker.setDefault(f.cls.value);
     f.onsubmit = async e => {
       e.preventDefault();
       const name = f.name.value.trim();
       if (!name) return;
       if (state.holdings.some(x => x.name.toLowerCase() === name.toLowerCase() && x !== h)) { toast('A holding with that name already exists'); return; }
-      const data = { name, cls: f.cls.value, symbol: f.symbol.value.trim(), mode: f.mode.value, unit: f.mode.value === 'units' ? f.unit.value.trim() : '', notes: f.notes.value.trim() };
+      const feed = f.mode.value === 'units' ? picker.read() : null;
+      const data = { name, cls: f.cls.value, symbol: f.symbol.value.trim(), mode: f.mode.value, unit: f.mode.value === 'units' ? f.unit.value.trim() : '', notes: f.notes.value.trim(), feed };
       let target = h;
       if (h) Object.assign(h, data); else { target = { id: uid(), ...data }; state.holdings.push(target); }
+      if (feed) applyFeed();
       await save(); dlg.close(); renderAll();
       if (afterSave) afterSave(target);
       else if (!h) openTxn(target.id);
@@ -1018,7 +1246,7 @@
   }
 
   // ---------- boot ----------
-  const APP_VERSION = '1.1.0';
+  const APP_VERSION = '1.2.0';
   $$('.tabbar button').forEach(b => b.onclick = () => showView(b.dataset.view));
   $('#fab').onclick = () => openTxn();
   // close dialogs by tapping the backdrop
@@ -1028,7 +1256,16 @@
     await Store.open();
     const saved = await Store.get('state');
     if (saved && Array.isArray(saved.holdings)) state = { ...emptyState(), ...saved };
+    normalizeMarket();
+    try { feedData = (await Store.get('feed')) || null; } catch { }
     renderAll();
+    loadFeed(false).then(async d => {
+      if (!d) return;
+      const n = state.market.autoApply ? applyFeed() : 0;
+      if (n) await save();
+      renderAll();
+      if (n) toast(`Prices updated for ${n} holding${n > 1 ? 's' : ''}`);
+    });
     try { if (navigator.storage?.persist && !(await navigator.storage.persisted())) navigator.storage.persist(); } catch { }
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('sw.js').catch(() => { });
   })();
