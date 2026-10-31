@@ -461,6 +461,21 @@ def build(prev: dict) -> dict:
     return out
 
 
+# Fields that change on every run even when no price did. Ignored when deciding whether to
+# write (and so commit) a new file: a quiet run then costs no commit and no Pages rebuild.
+VOLATILE = {"updated", "fetched", "time", "errors"}
+
+
+def same_prices(a, b) -> bool:
+    def strip(o):
+        if isinstance(o, dict):
+            return {k: strip(v) for k, v in o.items() if k not in VOLATILE}
+        if isinstance(o, list):
+            return [strip(x) for x in o]
+        return o
+    return strip(a) == strip(b)
+
+
 def main() -> int:
     try:
         with open(OUT, encoding="utf-8") as f:
@@ -475,16 +490,26 @@ def main() -> int:
         psx_errors = []
         psx = fetch_psx(psx_errors)
         if psx:
-            with open(PSX_OUT, "w", encoding="utf-8") as f:
-                json.dump(encrypt_json(psx, key), f, separators=(",", ":"))
+            old = None
+            try:
+                with open(PSX_OUT, encoding="utf-8") as f:
+                    old = decrypt_json(json.load(f), key)
+            except Exception:  # noqa: BLE001 -- no file yet, or a new passphrase
+                pass
+            if old is None or not same_prices(old, psx):   # re-encrypting always differs (new salt), so only when needed
+                with open(PSX_OUT, "w", encoding="utf-8") as f:
+                    json.dump(encrypt_json(psx, key), f, separators=(",", ":"))
             data["psx_private"] = {"available": True, "count": psx["count"], "date": psx["date"]}
         else:
             data["psx_private"] = {"available": os.path.exists(PSX_OUT), "stale": True}
         data["errors"] += psx_errors
     else:
         data["psx_private"] = {"available": False, "note": "Set the PSX_DATA_KEY repo secret to enable encrypted PSX prices."}
-    with open(OUT, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
+    if prev and same_prices(prev, data):
+        print("no price changed since the last run: file left as it is (no commit)")
+    else:
+        with open(OUT, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, separators=(",", ":"))
     f_ = data.get("funds") or {}
     print(f"funds={f_.get('count')} date={f_.get('latest_date')} usd={((data.get('fx') or {}).get('pkr') or {}).get('USD')} "
           f"psx={data.get('psx_private')} gold_tola={(data['metals'].get('gold') or {}).get('pkr_tola')} errors={len(data['errors'])} stale={data['stale']}")

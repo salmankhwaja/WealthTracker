@@ -28,6 +28,16 @@ There are no accounts, servers or trackers. The data lives in the browser on you
 - **Works offline** through a service worker. Light and dark themes are supported.
 - **Strict Content-Security-Policy.** No third-party code is loaded.
 
+## GitHub Actions usage
+
+The repo is public, so GitHub Actions minutes on its standard runners cost nothing and have no monthly cap. The workflows are kept light anyway:
+
+- **prices:** about 17 runs a week, each around half a minute. A run with no new prices makes no commit, so it doesn't trigger a Pages rebuild.
+- **test:** runs only when code changes (not for data or docs), and a newer push cancels an older run.
+- **Limits:** every job has a 5-minute timeout, so nothing can hang and burn time.
+
+If the repo is ever made private, the free plan's 2,000 minutes a month still covers this many times over.
+
 ## Entering your history
 
 - **Mutual funds:** enter the **amount invested** (typed as `100,000`; commas are added as you type), and the app works out units = amount ÷ NAV.
@@ -42,7 +52,7 @@ Tap the half-circle button in the header to switch between Auto (follows your ph
 
 ## Live prices
 
-A GitHub Action (`.github/workflows/prices.yml`) runs `scripts/fetch_prices.py` three times a day and commits `data/prices.json`. The app reads that file from its own site, so no personal data is sent anywhere, and it works offline from the last copy.
+A GitHub Action (`.github/workflows/prices.yml`) runs `scripts/fetch_prices.py` three times each weekday and once on Saturday, and commits `data/prices.json` only when a price actually changed. The app reads that file from its own site, so no personal data is sent anywhere, and it works offline from the last copy.
 
 | Data | Source | Notes |
 |---|---|---|

@@ -1,11 +1,14 @@
 name: prices
 # Downloads public prices (MUFAP NAVs, gold/silver spot, FX) into data/prices.json.
 # The app reads that file from the same GitHub Pages site; no user data is involved.
+# Budget: about 17 short runs a week (~30 s each). It commits only when a price actually
+# changed, so quiet runs don't trigger a Pages rebuild either.
 on:
   schedule:
-    - cron: "13 5 * * *"    # 10:13 PKT
-    - cron: "13 11 * * *"   # 16:13 PKT
-    - cron: "43 17 * * *"   # 22:43 PKT, after most AMCs publish NAVs
+    - cron: "13 5 * * 1-5"   # Mon-Fri 10:13 PKT
+    - cron: "13 11 * * 1-5"  # Mon-Fri 16:13 PKT
+    - cron: "43 17 * * 1-5"  # Mon-Fri 22:43 PKT, after most AMCs publish NAVs
+    - cron: "43 17 * * 6"    # Saturday once: late Friday NAVs; gold and FX barely move at weekends
   workflow_dispatch:
   push:
     branches: [main]
@@ -18,12 +21,12 @@ concurrency:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install cryptography==44.0.0
+      - run: pip install -q cryptography==44.0.0
       - run: python3 tests/test_fetch_prices.py
       - run: python3 scripts/fetch_prices.py
         env:

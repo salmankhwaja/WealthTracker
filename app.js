@@ -860,7 +860,7 @@
         <div data-show="${k}.manual"><label class="zk-field">${label} 24K price per tola (PKR)<input type="number" step="any" min="0" inputmode="decimal" data-mk="${k}.manualTola" value="${esc(m[k].manualTola)}"></label></div>
       </div>`;
     return `<div class="card">
-        <p class="info">Prices refresh three times a day on this site from public sources, then load on your phone. No personal data is sent anywhere.</p>
+        <p class="info">Prices refresh on weekdays (three times) and Saturday on this site from public sources, then load on your phone. No personal data is sent anywhere.</p>
         <label class="zk-check"><input type="checkbox" id="mk-auto" ${m.autoApply ? 'checked' : ''}><span>Update linked holdings automatically when the app opens</span></label>
         <div class="btn-grid gap-top"><button class="primary" id="mk-refresh">Refresh & apply now</button><button class="ghost" id="mk-navs">Browse fund NAVs</button></div>
         <button class="link" id="mk-psx">Browse PSX shares</button>

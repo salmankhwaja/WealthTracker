@@ -50,4 +50,9 @@ try:
         _j.dump(doc, open(fx_path, "w"))
 except ImportError:
     print("(cryptography not installed: skipped encryption test)")
+# Quiet runs: only timestamps differ -> treated as unchanged; a real price change is not
+a = {"updated": "t1", "errors": [], "fx": {"time": "x", "pkr": {"USD": 280.0}}}
+b = {"updated": "t2", "errors": [{"source": "x"}], "fx": {"time": "y", "pkr": {"USD": 280.0}}}
+assert fp.same_prices(a, b)
+assert not fp.same_prices(a, {**b, "fx": {"time": "y", "pkr": {"USD": 281.0}}})
 print("All fetch_prices tests passed.")
