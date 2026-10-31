@@ -1,5 +1,5 @@
 // Service worker: caches the app shell so it opens offline. Bump VERSION on every release.
-const VERSION = 'pkw-v1.4.1';
+const VERSION = 'pkw-v1.4.2';
 const SHELL = ['./', 'index.html', 'theme-init.js', 'styles.css', 'app.js', 'finance.js', 'zakat.js', 'feed.js', 'charges.js', 'manifest.webmanifest',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-192.png', 'icons/maskable-512.png'];
 

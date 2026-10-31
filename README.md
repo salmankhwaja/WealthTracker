@@ -52,6 +52,8 @@ The header has a row of coloured dots, one per theme, as in CyberWatch: tap a do
 
 ## Live prices
 
+**PSX prices are shared with the PSX & MUFAP dashboard.** [Day-Trader-PSX](https://github.com/salmankhwaja/Day-Trader-PSX), served from the same GitHub Pages site, fetches PSX once for both apps and writes `feed/latest.enc.json` in this app's encrypted format. The app reads that file first (the newer of it and this repo's own `data/psx.enc.json` wins) and unlocks it with the same passphrase. With Day-Trader-PSX's feed on, leave `PSX_DATA_KEY` unset here, so PSX isn't fetched twice; this repo's workflow keeps fetching MUFAP NAVs, gold and FX.
+
 A GitHub Action (`.github/workflows/prices.yml`) runs `scripts/fetch_prices.py` three times each weekday and once on Saturday, and commits `data/prices.json` only when a price actually changed. The app reads that file from its own site, so no personal data is sent anywhere, and it works offline from the last copy.
 
 | Data | Source | Notes |

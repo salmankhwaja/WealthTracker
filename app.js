@@ -745,15 +745,23 @@
     return feedData;
   }
   // PSX prices are published only encrypted (PSX restricts redistribution); decrypt with the device-held passphrase.
+  // The PSX & MUFAP dashboard (Day-Trader-PSX) on the same GitHub Pages site fetches PSX once for both apps and
+  // writes feed/latest.enc.json in this app's format; it is read first, and this repo's own file is the fallback.
+  const SHARED_PSX = '../Day-Trader-PSX/feed/';
+  async function fetchDoc(url, force) {
+    try { const r = await fetch(url, { cache: force ? 'no-store' : 'no-cache' }); return r.ok ? await r.json() : null; } catch { return null; }
+  }
   async function loadPsx(force) {
-    let pass = null, doc = null;
+    let pass = null;
+    const shared = await fetchDoc(SHARED_PSX + 'status.json', true);
+    if (shared?.psx?.available) feedData.psx_private = Object.assign({}, feedData.psx_private, { available: true, shared: true, stale: false });
     try { pass = await Store.get('psxkey'); } catch { }
     if (!pass) return false;
-    try {
-      const r = await fetch('data/psx.enc.json', { cache: force ? 'no-store' : 'no-cache' });
-      if (r.ok) { doc = await r.json(); try { await Store.set('psxenc', doc); } catch { } }
-    } catch { }
-    if (!doc) { try { doc = await Store.get('psxenc'); } catch { } }
+    const docs = [shared?.psx?.available ? await fetchDoc(SHARED_PSX + 'latest.enc.json', force) : null, await fetchDoc('data/psx.enc.json', force)]
+      .filter(d => d && d.format === 'pk-wealth-psx');
+    let doc = docs.sort((x, y) => String(y.updated || '').localeCompare(String(x.updated || '')))[0] || null;
+    if (doc) { try { await Store.set('psxenc', doc); } catch { } }
+    else { try { doc = await Store.get('psxenc'); } catch { } }
     if (!doc) return false;
     try { feedData.psx = await FD.decryptDoc(doc, pass); feedData.psx.stale = !!feedData.psx_private?.stale; return true; }
     catch { feedData.psx = null; feedData.psxError = 'wrong passphrase'; return false; }
@@ -867,7 +875,7 @@
       </div>
       <div class="card">
         <b>PSX share prices (private)</b>
-        <p class="info small">PSX restricts redistribution of its market data, so this site publishes PSX prices only as an encrypted file. Enter the same passphrase you saved as the repo's <code>PSX_DATA_KEY</code> secret; it stays on this device.
+        <p class="info small">PSX restricts redistribution of its market data, so PSX prices are published only as an encrypted file. ${feedData?.psx_private?.shared ? 'They come from the PSX &amp; MUFAP dashboard on this site, which fetches them once for both apps. ' : ''}Enter the passphrase saved as the <code>PSX_DATA_KEY</code> secret (of Day-Trader-PSX, or of this repo); it stays on this device.
         ${feedData?.psx ? `<br><span class="pos">Unlocked · ${feedData.psx.count} shares · ${fmtDate(feedData.psx.date)}</span>` : feedData?.psxError ? '<br><span class="neg">That passphrase did not unlock the file.</span>' : feedData?.psx_private?.available ? '<br>Encrypted prices are available on this site.' : '<br>Not enabled on this site yet.'}</p>
         <label class="zk-field">Passphrase<input type="password" id="mk-psxkey" autocomplete="off" placeholder="${feedData?.psx ? '•••••• (saved)' : ''}"></label>
         <button class="ghost" id="mk-psxsave">Save & unlock</button>
