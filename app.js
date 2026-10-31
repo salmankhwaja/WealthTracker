@@ -1441,7 +1441,7 @@
     const d = new Date();
     const date = d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
     const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-    $('#clock').innerHTML = `<b>${esc(time)}</b><br>${esc(date)}`;
+    $('#clock').innerHTML = `<b>${esc(time)}</b><br><span class="cd">${esc(date)}</span>`;
   }
   function applyTheme(id) {
     const valid = THEMES.some(t => t.id === id) ? id : 'auto';
@@ -1449,16 +1449,12 @@
     try { localStorage.setItem('pkw-theme', valid); } catch { }
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#0f766e');
-    $$('#theme-menu button').forEach(b => b.setAttribute('aria-checked', String(b.dataset.theme === valid)));
+    $$('#theme-dots .sw').forEach(b => { const on = b.dataset.theme === valid; b.classList.toggle('active', on); b.setAttribute('aria-checked', String(on)); });
   }
-  function setupThemes() {
-    const btn = $('#theme-btn'), menu = $('#theme-menu');
-    menu.innerHTML = THEMES.map(t => `<button role="menuitemradio" data-theme="${t.id}" aria-checked="false"><span class="swatch swatch-${t.id}"></span>${t.label}</button>`).join('');
-    const close = () => { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
-    btn.onclick = e => { e.stopPropagation(); menu.hidden = !menu.hidden; btn.setAttribute('aria-expanded', String(!menu.hidden)); };
-    $$('button', menu).forEach(b => b.onclick = () => { applyTheme(b.dataset.theme); close(); });
-    document.addEventListener('click', e => { if (!menu.hidden && !menu.contains(e.target)) close(); });
-    document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  function setupThemes() {   // CyberWatch-style: one tap on a coloured dot
+    const row = $('#theme-dots');
+    row.innerHTML = THEMES.map(t => `<button type="button" class="sw sw-${t.id}" role="radio" aria-checked="false" data-theme="${t.id}" title="${t.label}" aria-label="${t.label} theme"></button>`).join('');
+    row.onclick = e => { const b = e.target.closest('[data-theme]'); if (b) applyTheme(b.dataset.theme); };
     applyTheme(document.documentElement.getAttribute('data-theme'));
   }
 

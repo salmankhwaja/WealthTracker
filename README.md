@@ -48,7 +48,7 @@ If the repo is ever made private, the free plan's 2,000 minutes a month still co
 
 ## Themes & header
 
-Tap the half-circle button in the header to switch between Auto (follows your phone), Light, Blue Gray, Black, Terminal and Red. The choice is saved per device. The header also shows the current time and date.
+The header has a row of coloured dots, one per theme, as in CyberWatch: tap a dot to switch between Auto (follows your phone), Light, Blue Gray, Black, Terminal and Red. Each dot shows that theme's accent colour inside its background colour; the active one has a ring. The choice is saved per device. The header also shows the current time and date (on a phone, just the time, to leave room for the dots).
 
 ## Live prices
 
