@@ -768,6 +768,14 @@
     try { feedData.psx = await FD.decryptDoc(doc, pass); feedData.psx.stale = !!feedData.psx_private?.stale; return true; }
     catch { feedData.psx = null; feedData.psxError = 'wrong passphrase'; return false; }
   }
+  /** The date most funds' NAVs carry. MUFAP lists each NAV with its validity date, and some money-market and
+   *  cash funds already list the next dealing day (a Friday NAV valid on Monday), so the newest date misleads. */
+  function navAsOf(funds) {
+    const cnt = {};
+    (funds?.items || []).forEach(i => { if (i.date) cnt[i.date] = (cnt[i.date] || 0) + 1; });
+    const keys = Object.keys(cnt);
+    return keys.length ? keys.reduce((a, b) => (cnt[b] > cnt[a] ? b : a)) : funds?.latest_date;
+  }
   const linked = () => state.holdings.filter(h => h.feed && h.mode === 'units');
   const livePrice = h => (h.feed ? FD.priceFor(feedData, h.feed, h.unit, state.market) : null);
 
@@ -812,7 +820,7 @@
         <div class="kpi"><div class="k">Gold 24K / tola${st('gold')}</div><div class="v">${g ? money(g.perGram * FD.TOLA_G) : '—'}</div></div>
         <div class="kpi"><div class="k">Silver / tola${st('silver')}</div><div class="v">${sv ? money(sv.perGram * FD.TOLA_G) : '—'}</div></div>
         <div class="kpi"><div class="k">PSX closes${st('psx')}</div><div class="v small-v">${feedData.psx ? feedData.psx.count + ' · ' + fmtDate(feedData.psx.date) : 'unavailable'}</div></div>
-        <div class="kpi"><div class="k">Fund NAVs${st('funds')}</div><div class="v small-v">${feedData.funds ? feedData.funds.count + ' · ' + fmtDate(feedData.funds.latest_date) : 'unavailable'}</div></div>
+        <div class="kpi"><div class="k">Fund NAVs${st('funds')}</div><div class="v small-v">${feedData.funds ? feedData.funds.count + ' · ' + fmtDate(navAsOf(feedData.funds)) : 'unavailable'}</div></div>
       </div>
       <p class="info small">Fetched ${feedData.updated ? new Date(feedData.updated).toLocaleString() : '—'} by this site's scheduled job (weekdays about 10 am, 4 pm and 11 pm PKT, and Saturday night). Each visit picks up the newest; prices you typed are never overwritten.</p>
       <p class="info small">${g ? 'Gold: ' + esc(g.source) + '. ' : ''}<button class="link" data-goto="data">Sources & settings</button>${feedData.psx ? ' · <button class="link" id="mkt-psx">PSX shares</button>' : ''}${feedData.funds ? ' · <button class="link" id="mkt-navs">Fund NAVs</button>' : ''}</p>
@@ -834,7 +842,7 @@
     const groups = isPsx ? [...new Set(items.map(x => x.sector || 'Other'))].sort() : FD.amcList(feedData);
     $('#nav-amc').innerHTML = `<option value="">${isPsx ? 'All sectors' : 'All AMCs'}</option>` + groups.map(a => `<option>${esc(a)}</option>`).join('');
     $('#nav-meta').textContent = isPsx ? (feedData?.psx ? `${feedData.psx.count} shares · closing prices ${fmtDate(feedData.psx.date)}` : '')
-      : (feedData?.funds ? `${feedData.funds.count} funds from MUFAP · latest ${fmtDate(feedData.funds.latest_date)}` : '');
+      : (feedData?.funds ? `${feedData.funds.count} funds from MUFAP · as of ${fmtDate(navAsOf(feedData.funds))}` : '');
     $('#nav-q').placeholder = isPsx ? 'Search symbol, company or sector' : 'Search fund, AMC or category';
     const draw = () => {
       const q = $('#nav-q').value.trim().toLowerCase(), g = $('#nav-amc').value;
