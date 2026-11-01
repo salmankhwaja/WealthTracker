@@ -219,7 +219,9 @@
         <p>PSX shares, mutual funds, bank savings and gold — with XIRR and CAGR. Your data never leaves this device.</p>
         <button class="primary" id="btn-first">Add your first holding</button>
         <p><button class="link" id="btn-sample">or load sample data to explore</button></p>
-      </div>`;
+      </div>
+      ${marketCardHTML()}`;
+      wireMarketCard(el);
       $('#btn-first').onclick = () => openHolding();
       $('#btn-sample').onclick = loadSample;
       return;
@@ -812,6 +814,7 @@
         <div class="kpi"><div class="k">PSX closes${st('psx')}</div><div class="v small-v">${feedData.psx ? feedData.psx.count + ' · ' + fmtDate(feedData.psx.date) : 'unavailable'}</div></div>
         <div class="kpi"><div class="k">Fund NAVs${st('funds')}</div><div class="v small-v">${feedData.funds ? feedData.funds.count + ' · ' + fmtDate(feedData.funds.latest_date) : 'unavailable'}</div></div>
       </div>
+      <p class="info small">Fetched ${feedData.updated ? new Date(feedData.updated).toLocaleString() : '—'} by this site's scheduled job (weekdays about 10 am, 4 pm and 11 pm PKT, and Saturday night). Each visit picks up the newest; prices you typed are never overwritten.</p>
       <p class="info small">${g ? 'Gold: ' + esc(g.source) + '. ' : ''}<button class="link" data-goto="data">Sources & settings</button>${feedData.psx ? ' · <button class="link" id="mkt-psx">PSX shares</button>' : ''}${feedData.funds ? ' · <button class="link" id="mkt-navs">Fund NAVs</button>' : ''}</p>
     </div>`;
   }

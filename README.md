@@ -67,6 +67,10 @@ In the app:
 
 - **Link a holding** (Edit holding → Auto price) to a MUFAP fund, gold or silver (24/22/21/18K, unit in tola, gram, ounce or kg), or a currency.
 - **Browse fund NAVs** from the Overview's *Market today* card and tap **Track** to add a fund.
+- **When were prices fetched?** The *Market today* card (also on the empty start screen) shows when this site's scheduled
+  job last fetched gold, USD, fund NAVs and PSX closes. It runs weekdays about 10 am, 4 pm and 11 pm PKT and Saturday
+  night; each visit picks up the newest, and prices you typed are never overwritten. Only you (the repo owner) can run it
+  by hand, from the Actions tab.
 - **Automatic updates.** Linked holdings get a dated price when the app opens. A price you typed yourself is never overwritten. You can switch this off on the Data tab.
 - **Gold rate choice** (Data tab):
   - International spot, optionally with a local premium %.
