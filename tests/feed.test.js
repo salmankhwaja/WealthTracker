@@ -43,3 +43,14 @@ const doc = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'psx_sam
   await assert.rejects(FD.decryptDoc(doc, 'wrong', subtle));
   console.log('All feed tests passed.');
 })().catch(e => { console.error(e); process.exit(1); });
+
+// NAV on a past date from the monthly NAV history: that day, else the last before it (10 days at most)
+{
+  const M = { '2026-10': { syms: ['Meezan Islamic Fund'], days: { '2026-10-30': { c: [95.2], o: [97.1], r: [95.2] } } },
+              '2026-11': { syms: ['ABL Cash Fund', 'Meezan Islamic Fund'], days: { '2026-11-03': { c: [10.1, 96], o: [null, 98], r: [null, 96] } } } };
+  assert.deepStrictEqual(FD.navOn(M, 'meezan islamic fund', '2026-11-03'), { date: '2026-11-03', nav: 96, offer: 98, repurchase: 96 });
+  assert.strictEqual(FD.navOn(M, 'Meezan Islamic Fund', '2026-11-01').date, '2026-10-30');   // a weekend: the last before, across months
+  assert.strictEqual(FD.navOn(M, 'ABL Cash Fund', '2026-11-02'), null);                      // before its history
+  assert.strictEqual(FD.navOn(M, 'Meezan Islamic Fund', '2026-11-20'), null);                // more than 10 days on
+}
+console.log('navOn ok');

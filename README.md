@@ -42,7 +42,8 @@ If the repo is ever made private, the free plan's 2,000 minutes a month still co
 
 - **Mutual funds:** enter the **amount invested** (typed as `100,000`; commas are added as you type), and the app works out units = amount ÷ NAV.
   - **Recent dates:** for linked funds, the NAV is filled in from MUFAP. For buys it uses the offer price (NAV + front-end load).
-  - **Older dates:** you type the NAV (or the offer price you paid) from your fund statement. The form flags when this is needed.
+  - **Past dates:** the NAV (or offer price) for that day is filled in from the NAV history the price job keeps in `data/navs/` (the last day before it for a weekend or holiday). MUFAP publishes only today's NAVs, so the history starts from late October 2026 and grows by itself, a year kept.
+  - **Older than the history:** you type the NAV (or the offer price you paid) from your fund statement. The form says when.
 - **PSX:** enter shares and price per share; the total including charges is calculated. Other holdings take a price per unit and a quantity.
 - **Example placeholders:** every field shows a faint example of what to enter.
 
@@ -187,6 +188,8 @@ feed.js               maps data/prices.json (and decrypted PSX prices) to holdin
 charges.js            PSX brokerage, sales tax, CDC and levies estimate per trade (pure, tested)
 scripts/              price fetcher run by GitHub Actions
 data/prices.json      latest public prices (written by the Action)
+data/navs/YYYY-MM.json  a year of MUFAP NAVs, offer and repurchase prices by date (written by the Action;
+                      the PSX & MUFAP dashboard on the same site reads it too)
 styles.css            mobile-first styles, six themes
 theme-init.js         applies the saved theme before first paint
 sw.js                 offline cache

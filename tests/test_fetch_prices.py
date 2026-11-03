@@ -55,4 +55,21 @@ a = {"updated": "t1", "errors": [], "fx": {"time": "x", "pkr": {"USD": 280.0}}}
 b = {"updated": "t2", "errors": [{"source": "x"}], "fx": {"time": "y", "pkr": {"USD": 280.0}}}
 assert fp.same_prices(a, b)
 assert not fp.same_prices(a, {**b, "fx": {"time": "y", "pkr": {"USD": 281.0}}})
+# NAV history: today's NAVs merge into monthly files; months older than a year are dropped
+import tempfile, shutil, json as _json, datetime as _dt
+nd = tempfile.mkdtemp()
+try:
+    open(os.path.join(nd, "2024-01.json"), "w").write("{}")
+    w = fp.save_navs([{"fund": "Meezan Islamic Fund", "nav": 95.2, "offer": 97.1, "repurchase": 95.2, "date": "2026-10-29"},
+                      {"fund": "ABL Cash Fund", "nav": 10.1, "date": "2026-11-02"}], nd, _dt.date(2026, 11, 3))
+    assert sorted(w) == ["2024-01.json", "2026-10.json", "2026-11.json"], w
+    fp.save_navs([{"fund": "ABL Cash Fund", "nav": 10.11, "date": "2026-11-03"}, {"fund": "New Fund", "nav": 5.0, "date": "2026-11-03"}], nd, _dt.date(2026, 11, 3))
+    nov = _json.load(open(os.path.join(nd, "2026-11.json")))
+    assert nov["syms"] == ["ABL Cash Fund", "New Fund"], nov
+    assert nov["days"]["2026-11-02"]["c"] == [10.1, None] and nov["days"]["2026-11-03"]["c"] == [10.11, 5.0], nov
+    oct_ = _json.load(open(os.path.join(nd, "2026-10.json")))
+    assert oct_["days"]["2026-10-29"] == {"c": [95.2], "o": [97.1], "r": [95.2]}, oct_
+    assert fp.save_navs([{"fund": "ABL Cash Fund", "nav": 10.11, "date": "2026-11-03"}], nd, _dt.date(2026, 11, 3)) == []   # nothing new
+finally:
+    shutil.rmtree(nd)
 print("All fetch_prices tests passed.")

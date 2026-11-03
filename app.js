@@ -776,6 +776,23 @@
     const keys = Object.keys(cnt);
     return keys.length ? keys.reduce((a, b) => (cnt[b] > cnt[a] ? b : a)) : funds?.latest_date;
   }
+  // NAV history (data/navs/YYYY-MM.json, kept by the price workflow): a fund's NAV on a past date.
+  const NAVH = {};
+  function navHistory(fund, date, onLoad) {
+    const t = Date.parse(date + 'T00:00:00Z');
+    if (isNaN(t)) return null;
+    const want = [...new Set([date.slice(0, 7), new Date(t - 10 * 864e5).toISOString().slice(0, 7)])];
+    const missing = want.filter(m => !(m in NAVH));
+    missing.forEach(m => {
+      NAVH[m] = undefined;
+      fetch(`data/navs/${m}.json`, { cache: 'no-cache' }).then(r => r.ok ? r.json() : null).catch(() => null)
+        .then(x => { NAVH[m] = x; if (want.every(k => NAVH[k] !== undefined) && onLoad) onLoad(); });
+    });
+    const ms = {};
+    want.forEach(m => { if (NAVH[m]) ms[m] = NAVH[m]; });
+    return FD.navOn(ms, fund, date);
+  }
+  const navFirst = () => feedData?.nav_history?.first || null;
   const linked = () => state.holdings.filter(h => h.feed && h.mode === 'units');
   const livePrice = h => (h.feed ? FD.priceFor(feedData, h.feed, h.unit, state.market) : null);
 
@@ -1072,7 +1089,14 @@
       if (h.feed.type === 'mufap') {
         const it = FD.findFund(feedData, h.feed.fund);
         if (!it) return null;
-        if (f.date.value && it.date && f.date.value < it.date) return { old: true, date: it.date };
+        if (f.date.value && it.date && f.date.value < it.date) {
+          // An older date: the fund's NAV on that day from the NAV history (data/navs), if it goes back that far.
+          const past = navHistory(h.feed.fund, f.date.value, () => { if (priceMode(h)) { fillPrice(h); calc(); } });
+          if (!past) return { old: true, date: it.date };
+          const p = buy ? (past.offer || past.nav) : (past.repurchase || past.nav);
+          const label = buy && past.offer && past.offer !== past.nav ? 'offer price (NAV + front-end load)' : !buy && past.repurchase && past.repurchase !== past.nav ? 'repurchase price' : 'NAV';
+          return { price: p, date: past.date, label: 'MUFAP ' + label, before: past.date !== f.date.value ? f.date.value : null };
+        }
         const p = buy ? (it.offer || it.nav) : (it.repurchase || it.nav);
         const label = buy && it.offer && it.offer !== it.nav ? 'offer price (NAV + front-end load)' : !buy && it.repurchase && it.repurchase !== it.nav ? 'repurchase price' : 'NAV';
         return { price: p, date: it.date, label: 'MUFAP ' + label };
@@ -1088,13 +1112,13 @@
       const isMf = h.cls === 'mf';
       if (fp && fp.price && (priceAuto || !$('#txn-price').value)) {
         setNum($('#txn-price'), fp.price); priceAuto = true;
-        priceNote = `Filled from ${fp.label} for ${fmtDate(fp.date)}.`;
+        priceNote = `Filled from ${fp.label} for ${fmtDate(fp.date)}${fp.before ? `, the last before ${fmtDate(fp.before)}` : ''}.`;
       } else if (priceAuto && (!fp || fp.old)) {
         $('#txn-price').value = ''; priceAuto = false;
       }
       if (!priceAuto) {
         priceNote = fp?.old
-          ? `<span class="old-date">Older date — enter the ${isMf ? 'NAV (or offer price you paid)' : 'price'} for ${fmtDate(f.date.value)} yourself${isMf ? ', from your fund statement or MUFAP' : ''}. Latest available is ${fmtDate(fp.date)}.</span>`
+          ? `<span class="old-date">Older date — enter the ${isMf ? 'NAV (or offer price you paid)' : 'price'} for ${fmtDate(f.date.value)} yourself${isMf ? ', from your fund statement or MUFAP' : ''}. ${isMf && navFirst() ? `NAV history on file starts ${fmtDate(navFirst())}; latest` : 'Latest'} available is ${fmtDate(fp.date)}.</span>`
           : h.feed ? '' : `Enter the ${isMf ? 'NAV / offer price' : 'price'} you ${f.type.value === 'SELL' ? 'sold' : 'bought'} at.`;
       }
     };

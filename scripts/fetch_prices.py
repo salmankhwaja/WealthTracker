@@ -34,6 +34,8 @@ from html.parser import HTMLParser
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "data", "prices.json")
 PSX_OUT = os.path.join(os.path.dirname(__file__), "..", "data", "psx.enc.json")
+NAV_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "navs")   # a year of MUFAP NAVs, one file a month
+NAV_MONTHS = 13
 PBKDF2_ITER = 310000
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 WealthTracker-price-bot"
 TROY_OZ_G = 31.1034768
@@ -461,6 +463,87 @@ def build(prev: dict) -> dict:
     return out
 
 
+# ---------------------------------------------------------------- NAV history
+# data/navs/YYYY-MM.json: {"month", "syms": [fund names], "days": {validity date: {"c": [NAV], "o": [offer],
+# "r": [repurchase]}}}, arrays in line with syms, null where a fund had no price that day. The app (and the
+# PSX dashboard on the same site) fills a past date's NAV from it. Built up run by run: MUFAP publishes only
+# today's NAVs, so the history starts from the first run that kept it.
+
+def _months_kept(today):
+    y, m, out = today.year, today.month, []
+    for _ in range(NAV_MONTHS):
+        out.append("%04d-%02d" % (y, m))
+        m -= 1
+        if not m:
+            y, m = y - 1, 12
+    return set(out)
+
+
+def merge_navs(months: dict, items) -> None:
+    """Merge MUFAP rows ({fund, nav, offer, repurchase, date}) into month tables (in place)."""
+    for it in items or []:
+        d, name = it.get("date"), it.get("fund")
+        if not d or not name or it.get("nav") is None:
+            continue
+        m = months.setdefault(d[:7], {"month": d[:7], "syms": [], "days": {}})
+        if name not in m["syms"]:
+            m["syms"].append(name)
+            for day in m["days"].values():
+                for k in ("c", "o", "r"):
+                    day[k].append(None)
+        i = m["syms"].index(name)
+        day = m["days"].setdefault(d, {k: [None] * len(m["syms"]) for k in ("c", "o", "r")})
+        day["c"][i], day["o"][i], day["r"][i] = it.get("nav"), it.get("offer"), it.get("repurchase")
+
+
+def save_navs(items, nav_dir=NAV_DIR, today=None) -> list:
+    """Add today's NAVs to the monthly files and drop months older than NAV_MONTHS. Returns files written."""
+    keep = _months_kept(today or dt.date.today())
+    os.makedirs(nav_dir, exist_ok=True)
+    months, written = {}, []
+    for name in os.listdir(nav_dir):
+        m = name[:-5]
+        if not name.endswith(".json"):
+            continue
+        if m not in keep:
+            os.remove(os.path.join(nav_dir, name)); written.append(name)
+            continue
+        try:
+            with open(os.path.join(nav_dir, name), encoding="utf-8") as f:
+                months[m] = json.load(f)
+        except (OSError, ValueError):
+            pass
+    before = json.dumps(months, sort_keys=True)
+    old = json.loads(before)
+    merge_navs(months, items)
+    for m, obj in months.items():
+        if m in keep and obj != old.get(m):
+            obj["days"] = dict(sorted(obj["days"].items()))
+            with open(os.path.join(nav_dir, m + ".json"), "w", encoding="utf-8") as f:
+                json.dump(obj, f, ensure_ascii=False, separators=(",", ":"))
+            written.append(m + ".json")
+    return written
+
+
+def nav_history_info(nav_dir=NAV_DIR) -> dict:
+    """{"months": [...], "first": the earliest date most funds have}, for the app's "history starts" note
+    (a fund MUFAP still lists with an old date doesn't count as history going back that far)."""
+    months = sorted(n[:-5] for n in os.listdir(nav_dir) if n.endswith(".json")) if os.path.isdir(nav_dir) else []
+    first = None
+    for m in months:
+        try:
+            with open(os.path.join(nav_dir, m + ".json"), encoding="utf-8") as f:
+                obj = json.load(f)
+        except (OSError, ValueError):
+            continue
+        need = 50
+        days = [d for d, v in sorted((obj.get("days") or {}).items()) if sum(x is not None for x in v.get("c") or []) >= need]
+        if days:
+            first = days[0]
+            break
+    return {"months": months, "first": first}
+
+
 # Fields that change on every run even when no price did. Ignored when deciding whether to
 # write (and so commit) a new file: a quiet run then costs no commit and no Pages rebuild.
 VOLATILE = {"updated", "fetched", "time", "errors"}
@@ -505,6 +588,9 @@ def main() -> int:
         data["errors"] += psx_errors
     else:
         data["psx_private"] = {"available": False, "note": "Set the PSX_DATA_KEY repo secret to enable encrypted PSX prices."}
+    if (data.get("funds") or {}).get("items") and not (data["funds"].get("stale")):
+        print("NAV history:", ", ".join(save_navs(data["funds"]["items"])) or "no change")
+    data["nav_history"] = nav_history_info()
     if prev and same_prices(prev, data):
         print("no price changed since the last run: file left as it is (no commit)")
     else:

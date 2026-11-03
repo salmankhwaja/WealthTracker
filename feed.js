@@ -90,7 +90,25 @@
     return JSON.parse(new TextDecoder().decode(pt));
   }
 
-  const api = { decryptDoc, priceFor, metalPerGram, findFund, amcList, psxList, gramsPerUnit, TOLA_G, OZ_G };
+  /** A fund's NAV on a date from the monthly NAV history files ({syms, days: {date: {c, o, r}}}): that day,
+   *  else the last day before it, up to 10 days back. -> {date, nav, offer, repurchase} or null. */
+  function navOn(months, name, date) {
+    if (!months || !name || !/^\d{4}-\d{2}-\d{2}$/.test(date || '')) return null;
+    const want = norm(name), earliest = new Date(Date.parse(date + 'T00:00:00Z') - 10 * 864e5).toISOString().slice(0, 10);
+    for (const m of Object.keys(months).sort().reverse()) {
+      const M = months[m];
+      if (!M || !M.days || m > date.slice(0, 7) || m < earliest.slice(0, 7)) continue;
+      const i = (M.syms || []).findIndex(x => norm(x) === want);
+      if (i < 0) continue;
+      for (const d of Object.keys(M.days).filter(x => x <= date && x >= earliest).sort().reverse()) {
+        const D = M.days[d], c = D.c && D.c[i];
+        if (c != null) return { date: d, nav: c, offer: D.o ? D.o[i] : null, repurchase: D.r ? D.r[i] : null };
+      }
+    }
+    return null;
+  }
+
+  const api = { navOn, decryptDoc, priceFor, metalPerGram, findFund, amcList, psxList, gramsPerUnit, TOLA_G, OZ_G };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Feed = api;
 })(typeof self !== 'undefined' ? self : this);
