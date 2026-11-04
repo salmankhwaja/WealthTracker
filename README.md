@@ -200,3 +200,7 @@ tests/                node unit tests
 ## License
 
 MIT
+
+---
+
+Made by **Salman, Khwaja** (Namlas) · [github.com/salmankhwaja](https://github.com/salmankhwaja)
