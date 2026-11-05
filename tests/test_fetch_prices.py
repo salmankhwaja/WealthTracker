@@ -72,4 +72,19 @@ try:
     assert fp.save_navs([{"fund": "ABL Cash Fund", "nav": 10.11, "date": "2026-11-03"}], nd, _dt.date(2026, 11, 3)) == []   # nothing new
 finally:
     shutil.rmtree(nd)
+# crypto: CoinGecko in USD; Coinbase's rates (coins per USD) when CoinGecko fails
+_gj = fp.get_json
+fp.get_json = lambda u: {cid: {"usd": 100.0} for cid in fp.CRYPTO.values()} if "coingecko" in u else None
+_e = []
+_c = fp.fetch_crypto(_e)
+assert _c["source"] == "CoinGecko" and _c["usd"]["BTC"] == 100.0 and len(_c["usd"]) == len(fp.CRYPTO) and not _e, _c
+def _cb(u):
+    if "coingecko" in u:
+        raise OSError("429 Too Many Requests")
+    return {"data": {"rates": {"BTC": "0.00001", "ETH": "0.0004", "USDT": "1", "SOL": "0.005", "XRP": "2"}}}
+fp.get_json = _cb
+_e = []
+_c = fp.fetch_crypto(_e)
+assert _c["source"] == "Coinbase" and round(_c["usd"]["BTC"]) == 100000 and len(_e) == 1, _c
+fp.get_json = _gj
 print("All fetch_prices tests passed.")

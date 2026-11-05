@@ -82,9 +82,11 @@
         <select name="cls" id="holding-cls"></select>
       </label>
       <label>Symbol / account ref (optional) <input type="text" name="symbol" maxlength="40" autocomplete="off" placeholder="e.g. OGDC, or last 4 digits of the account"></label>
+      <label>Held at (optional) <input type="text" name="where" list="where-list" maxlength="40" autocomplete="off" placeholder="e.g. Wise, Fasset, Binance, Finqalab, HBL"></label>
+      <datalist id="where-list"></datalist>
       <label>Tracked by
         <select name="mode" id="holding-mode">
-          <option value="units">Units × price (stocks, funds, gold)</option>
+          <option value="units">Units × price (stocks, funds, gold, dollars, crypto)</option>
           <option value="value">Balance only (bank, deposits, other)</option>
         </select>
       </label>
@@ -97,7 +99,8 @@
             <option value="psx">PSX share price</option>
             <option value="mufap">Mutual fund NAV (MUFAP)</option>
             <option value="metal">Gold / silver rate</option>
-            <option value="fx">Exchange rate</option>
+            <option value="fx">Exchange rate (USD, EUR…)</option>
+            <option value="crypto">Crypto price</option>
           </select>
         </label>
         <div id="feed-psx">
@@ -113,6 +116,7 @@
           <label id="feed-karat-wrap">Purity <select id="feed-karat"><option value="24">24K</option><option value="22">22K</option><option value="21">21K</option><option value="18">18K</option></select></label>
         </div>
         <div id="feed-fx"><label>Currency <select id="feed-fx-code"></select></label></div>
+        <div id="feed-crypto"><label>Coin <select id="feed-coin"></select></label></div>
         <p class="hint" id="feed-preview"></p>
       </fieldset>
       <label>Notes <input type="text" name="notes" maxlength="200" autocomplete="off" placeholder="e.g. Finqalab account · SIP every month"></label>

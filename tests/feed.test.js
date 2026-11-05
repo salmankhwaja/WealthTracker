@@ -69,3 +69,13 @@ console.log('navOn ok');
 }
 console.log('fromPsxLedger ok');
 
+// crypto: the coin's USD price x USD/PKR
+{
+  const data = { fx: { pkr: { USD: 280 }, source: 'x' }, crypto: { source: 'CoinGecko', time: '2026-11-05T05:00:00Z', usd: { BTC: 68000, USDT: 1.0003 } } };
+  const p = FD.priceFor(data, { type: 'crypto', coin: 'btc' });
+  assert.strictEqual(p.price, 68000 * 280); assert.strictEqual(p.usd, 68000); assert.strictEqual(p.date, '2026-11-05');
+  assert.strictEqual(FD.priceFor(data, { type: 'crypto', coin: 'DOGE' }), null);
+  assert.strictEqual(FD.priceFor({ crypto: data.crypto }, { type: 'crypto', coin: 'BTC' }), null);   // no USD/PKR, no price
+}
+console.log('crypto ok');
+

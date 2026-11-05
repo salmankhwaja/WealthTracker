@@ -37,7 +37,7 @@
 
   /**
    * Price per holding unit for a linked holding.
-   * feedCfg: {type:'mufap', fund, field:'nav'|'repurchase'} | {type:'metal', metal:'gold'|'silver', karat} | {type:'fx', code}
+   * feedCfg: {type:'mufap', fund, field:'nav'|'repurchase'} | {type:'metal', metal:'gold'|'silver', karat} | {type:'fx', code} | {type:'crypto', coin}
    * Returns {price, date, source, stale} or null when unavailable.
    */
   function priceFor(data, feedCfg, unit, market) {
@@ -60,6 +60,11 @@
       const q = data.psx && data.psx.items && data.psx.items[String(feedCfg.symbol || '').toUpperCase().trim()];
       if (!q || !(q.current > 0)) return null;
       return { price: q.current, date: data.psx.date, source: 'PSX close', stale: !!data.psx.stale, changePct: q.change_pct };
+    }
+    if (feedCfg.type === 'crypto') {   // USD price x the USD/PKR rate
+      const c = data.crypto && data.crypto.usd && data.crypto.usd[String(feedCfg.coin || '').toUpperCase()], usd = data.fx && data.fx.pkr && data.fx.pkr.USD;
+      if (!(c > 0) || !(usd > 0)) return null;
+      return { price: c * usd, usd: c, date: String(data.crypto.time || data.updated || '').slice(0, 10), source: data.crypto.source + ' × USD/PKR', stale: !!(data.crypto.stale || data.fx.stale) };
     }
     if (feedCfg.type === 'fx') {
       const r = data.fx && data.fx.pkr && data.fx.pkr[feedCfg.code];

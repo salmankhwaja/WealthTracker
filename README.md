@@ -8,6 +8,8 @@ An offline-first Progressive Web App (PWA) for tracking a Pakistani portfolio in
 - **Mutual funds (MUFAP)**
 - **Bank savings and deposits**
 - **Gold**
+- **Dollars and other currencies** (Wise, Payoneer, Fasset, a bank's foreign-currency account…)
+- **Crypto** (BTC, ETH, USDT and 17 more, at live prices)
 - **Anything else**
 
 It calculates **XIRR** and **CAGR** per holding, per asset class and for the whole portfolio.
@@ -18,6 +20,7 @@ There are no accounts, servers or trackers. The data lives in the browser on you
 
 - **One app for every asset class.** Stocks, funds and gold are tracked as *units × price*. Bank accounts and other assets are tracked by *balance*.
 - **Transaction types.** Buy/Deposit, Sell/Withdrawal, Dividend or profit received, Bonus/reinvested units, and Fee.
+- **Where it's held.** Each holding can say where it sits (*Held at*: Wise, Fasset, Binance, Finqalab, a bank…), shown on the Holdings list. Dollars in Wise are a *Foreign Currency* holding in USD linked to the exchange rate; USDT on Fasset or coins on an exchange are a *Crypto* holding linked to that coin's price (CoinGecko, in USD, times USD/PKR; Coinbase if CoinGecko is down).
 - **Update screen.** You enter every NAV, share price, gold rate and bank balance on one screen. Values older than 30 days are flagged as stale.
 - **Returns.**
   - XIRR uses Excel's convention. It is verified against Microsoft's reference example in `tests/`.
@@ -63,6 +66,7 @@ A GitHub Action (`.github/workflows/prices.yml`) runs `scripts/fetch_prices.py` 
 | Gold & silver | [gold-api.com](https://gold-api.com) spot (USD/oz) × USD/PKR | Fallback: fawazahmed0 currency-api |
 | PSX share prices (all listed shares) | [PSX Data Portal market watch](https://dps.psx.com.pk/market-watch) | **Encrypted only**, see below |
 | USD, EUR, GBP, AED, SAR, CNY → PKR | [ExchangeRate-API open access](https://www.exchangerate-api.com) | Mid-market rate |
+| Crypto: BTC, ETH, USDT, USDC, BNB, SOL, XRP, ADA, DOGE, TRX, TON, LTC, AVAX, DOT, LINK, POL, SHIB, XLM, BCH, PAXG | [CoinGecko](https://www.coingecko.com) simple price (USD) × USD/PKR | Fallback: Coinbase exchange rates |
 
 In the app:
 
@@ -173,10 +177,10 @@ investments here, so they're left out. An encrypted backup asks for the passphra
 ```
 transactions.csv : date,holding,class,type,amount,units,note
 prices.csv       : date,holding,price,value
-holdings.csv     : name,class,symbol,mode,unit,notes
+holdings.csv     : name,class,symbol,where,mode,unit,notes
 ```
 
-- **`class`:** `psx`, `mf`, `bank`, `gold` or `other`.
+- **`class`:** `psx`, `mf`, `bank`, `gold`, `fx`, `crypto` or `other`.
 - **`type`:** `BUY`, `SELL`, `INCOME`, `REINVEST` or `FEE`. The aliases `DEPOSIT`, `WITHDRAWAL`, `DIVIDEND`, `PROFIT` and `BONUS` are also accepted.
 - **`price` vs `value`:** for units-tracked holdings `price` is the per-unit price. For balance-tracked holdings use `value`.
 

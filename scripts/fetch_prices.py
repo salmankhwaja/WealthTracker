@@ -13,6 +13,7 @@ Sources
           repo secret PSX_DATA_KEY is set, and are written ONLY as data/psx.enc.json, encrypted with
           AES-256-GCM (key = PBKDF2-SHA256 of that passphrase). The app decrypts it on your device.
   fx      open.er-api.com (USD base)            https://open.er-api.com/v6/latest/USD
+  crypto  CoinGecko simple price (USD)          https://api.coingecko.com/api/v3/simple/price (backup: Coinbase rates)
           fallback: fawazahmed0 currency-api
 
 If a source fails, the previous value is kept (marked stale) so the app never loses data.
@@ -63,6 +64,13 @@ CURAPI = [
     "https://latest.currency-api.pages.dev/v1/currencies/usd.json",
 ]
 FX_CODES = ["USD", "EUR", "GBP", "AED", "SAR", "CNY"]
+# Crypto: price in USD, the app converts at the USD/PKR rate. Symbol -> CoinGecko id.
+CRYPTO = {"BTC": "bitcoin", "ETH": "ethereum", "USDT": "tether", "USDC": "usd-coin", "BNB": "binancecoin", "SOL": "solana",
+          "XRP": "ripple", "ADA": "cardano", "DOGE": "dogecoin", "TRX": "tron", "TON": "the-open-network", "LTC": "litecoin",
+          "AVAX": "avalanche-2", "DOT": "polkadot", "LINK": "chainlink", "POL": "polygon-ecosystem-token", "SHIB": "shiba-inu",
+          "XLM": "stellar", "BCH": "bitcoin-cash", "PAXG": "pax-gold"}
+COINGECKO = "https://api.coingecko.com/api/v3/simple/price?vs_currencies=usd&ids="
+COINBASE = "https://api.coinbase.com/v2/exchange-rates?currency=USD"   # backup: units of each coin per 1 USD
 
 
 def now_iso() -> str:
@@ -414,6 +422,27 @@ def fetch_fx(errors):
         return None
 
 
+def fetch_crypto(errors):
+    """{"source", "time", "usd": {"BTC": 68000.0, ...}} from CoinGecko, or Coinbase's rates if that fails."""
+    try:
+        j = get_json(COINGECKO + ",".join(CRYPTO.values()))
+        usd = {sym: float(j[cid]["usd"]) for sym, cid in CRYPTO.items() if (j.get(cid) or {}).get("usd")}
+        if len(usd) >= 5:
+            return {"source": "CoinGecko", "time": now_iso(), "usd": usd}
+        raise ValueError("only %d coins" % len(usd))
+    except Exception as e:  # noqa: BLE001
+        errors.append({"source": "coingecko", "error": repr(e)[:200]})
+    try:
+        rates = get_json(COINBASE)["data"]["rates"]
+        usd = {sym: round(1 / float(rates[sym]), 8) for sym in CRYPTO if float(rates.get(sym) or 0) > 0}
+        if len(usd) >= 5:
+            return {"source": "Coinbase", "time": now_iso(), "usd": usd}
+        raise ValueError("only %d coins" % len(usd))
+    except Exception as e:  # noqa: BLE001
+        errors.append({"source": "coinbase", "error": repr(e)[:200]})
+    return None
+
+
 def build(prev: dict) -> dict:
     errors = []
     funds = fetch_funds(errors)
@@ -459,6 +488,11 @@ def build(prev: dict) -> dict:
     elif prev.get("funds"):
         out["funds"] = {**prev["funds"], "stale": True}; stale.append("funds")
 
+    crypto = fetch_crypto(errors)
+    if crypto:
+        out["crypto"] = crypto
+    elif prev.get("crypto"):
+        out["crypto"] = {**prev["crypto"], "stale": True}; stale.append("crypto")
     out["stale"] = stale
     return out
 
