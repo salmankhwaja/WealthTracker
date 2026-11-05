@@ -160,6 +160,14 @@ node tests/zakat.test.js       # unit tests for nisab / Zakat
 
 Restoring **replaces** the data on the target device. Treat one device as the main one where you enter data.
 
+## From the PSX & MUFAP dashboard
+
+On [Day-Trader-PSX](https://github.com/salmankhwaja/Day-Trader-PSX)'s website, *Data › Export ledger.json*
+(or *Save backup*), then here *Data › Restore backup or import from PSX* and pick the file. Share and fund
+buys and sales (with their charges) and dividends are **added** to what's here, each holding linked to its
+PSX or MUFAP price; importing a newer file later adds only what's new. Broker cash entries aren't
+investments here, so they're left out. An encrypted backup asks for the passphrase it was saved with.
+
 ## CSV formats
 
 ```

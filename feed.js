@@ -108,7 +108,38 @@
     return null;
   }
 
-  const api = { navOn, decryptDoc, priceFor, metalPerGram, findFund, amcList, psxList, gramsPerUnit, TOLA_G, OZ_G };
+  /** Holdings from the PSX & MUFAP dashboard (Day-Trader-PSX): its ledger.json, or what a backup holds.
+   *  -> {holdings: [{name, cls, symbol, feed}], txns: [{holding, date, type, amount, units, note}], cash}
+   *  Buys cost what they cost (price x shares + charges), sales bring what they brought (less charges);
+   *  fund trades are the amount and units; dividends are income. Broker cash entries aren't investments
+   *  here, so they're counted, not imported. */
+  function fromPsxLedger(lg) {
+    const r2 = x => Math.round(x * 100) / 100, out = { holdings: [], txns: [], cash: 0 }, seen = {};
+    const hold = (name, cls, feed) => { if (!seen[name]) { seen[name] = 1; out.holdings.push({ name, cls, symbol: cls === 'psx' ? name : '', feed }); } };
+    for (const e of (lg && lg.entries) || []) {
+      const ch = (+e.commission || 0) + (+e.taxes || 0) + (+e.other || 0), note = e.note ? String(e.note) : '';
+      if (e.type === 'buy' || e.type === 'sell') {
+        const sym = String(e.symbol || '').toUpperCase(), gross = (+e.qty || 0) * (+e.price || 0);
+        if (!sym || !gross) continue;
+        hold(sym, 'psx', { type: 'psx', symbol: sym });
+        out.txns.push({ holding: sym, date: e.date, type: e.type === 'buy' ? 'BUY' : 'SELL', amount: r2(e.type === 'buy' ? gross + ch : gross - ch), units: +e.qty,
+          note: (note ? note + ' · ' : '') + `${e.qty} @ ${e.price}` + (ch ? `, charges ${r2(ch)}` : '') + (e.broker ? `, ${e.broker}` : '') });
+      } else if (e.type === 'fund_buy' || e.type === 'fund_sell') {
+        if (!e.fund || !(+e.amount)) continue;
+        hold(e.fund, 'mf', { type: 'mufap', fund: e.fund });
+        out.txns.push({ holding: e.fund, date: e.date, type: e.type === 'fund_buy' ? 'BUY' : 'SELL', amount: r2(+e.amount), units: +e.units || null,
+          note: (note ? note + ' · ' : '') + (e.nav ? `NAV ${e.nav}` : '') });
+      } else if (e.type === 'dividend') {
+        const sym = String(e.symbol || '').toUpperCase();
+        if (!sym || !(+e.net)) continue;
+        hold(sym, 'psx', { type: 'psx', symbol: sym });
+        out.txns.push({ holding: sym, date: e.date, type: 'INCOME', amount: r2(+e.net), units: null, note: note || 'dividend' });
+      } else if (e.type === 'cash') out.cash++;
+    }
+    return out;
+  }
+
+  const api = { fromPsxLedger, navOn, decryptDoc, priceFor, metalPerGram, findFund, amcList, psxList, gramsPerUnit, TOLA_G, OZ_G };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Feed = api;
 })(typeof self !== 'undefined' ? self : this);

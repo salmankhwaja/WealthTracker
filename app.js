@@ -363,10 +363,10 @@
       <div id="mkt-settings">${marketSettingsHTML()}</div>
       <h3>Backup & move between devices</h3>
       <div class="card">
-        <p class="info">One encrypted file holds everything. Restore it on another phone or PC to carry on there. Put it in a Syncthing folder or cloud drive — only ciphertext leaves the device.</p>
+        <p class="info">One encrypted file holds everything. Restore it on another phone or PC to carry on there. Put it in a Syncthing folder or cloud drive — only ciphertext leaves the device. <b>From the PSX &amp; MUFAP dashboard:</b> pick its <code>ledger.json</code> or a backup it saved here too; your share and fund trades and dividends are added (not replaced), linked to live prices.</p>
         <div class="btn-grid">
           <button class="primary" id="d-backup">Save backup</button>
-          <button class="ghost" id="d-restore">Restore backup</button>
+          <button class="ghost" id="d-restore">Restore backup or import from PSX</button>
         </div>
         ${navigator.canShare ? '<p><button class="link" id="d-share">Share backup to an app…</button></p>' : ''}
       </div>
@@ -1361,7 +1361,8 @@
   async function restore(text) {
     let p;
     try { p = JSON.parse(text); } catch { toast('Not a valid backup file'); return; }
-    if (p.format !== 'pk-wealth-backup') { toast('Not a PK Wealth backup'); return; }
+    if (p.format === 'psx-desk-backup' || (p && Array.isArray(p.entries) && p.brokers)) { await importPsx(p); return; }
+    if (p.format !== 'pk-wealth-backup') { toast('Not a PK Wealth backup or a PSX dashboard file'); return; }
     let next;
     if (p.enc === 'none') next = p.state;
     else {
@@ -1377,6 +1378,47 @@
     if (state.holdings.length && !confirm(`Replace the ${state.holdings.length} holdings on this device with the ${next.holdings.length} in the backup?`)) return;
     state = { ...emptyState(), ...next, meta: { ...(next.meta || {}) } };
     await save(); renderAll(); showView('overview'); toast('Backup restored');
+  }
+
+  // ---------- from the PSX & MUFAP dashboard ----------
+  // Its ledger.json, or a backup it saved (encrypted or not): your share and fund trades and dividends
+  // join what's here, each holding linked to its PSX or MUFAP price. Entries already here are skipped,
+  // so importing a newer copy later adds only what's new.
+  async function importPsx(p) {
+    let lg = p;
+    if (p.format === 'psx-desk-backup') {
+      if (p.enc === 'none') lg = p.ledger;
+      else {
+        const pass = await askPass('Unlock the PSX backup', 'The passphrase you typed when you saved it on the PSX & MUFAP dashboard.');
+        if (pass === null) return;
+        try {
+          const key = await deriveKey(pass, unb64(p.salt), p.iterations);
+          const pt = JSON.parse(new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(p.iv) }, key, unb64(p.data))));
+          lg = pt.ledger || pt;
+        } catch { toast('Wrong passphrase or damaged file'); return; }
+      }
+    }
+    const got = FD.fromPsxLedger(lg);
+    if (!got.txns.length) { toast('No share or fund trades in that file'); return; }
+    let added = 0, skipped = 0, newH = 0;
+    const ids = {};
+    for (const x of got.holdings) {
+      let h = state.holdings.find(y => (x.feed.type === 'psx' && y.feed?.type === 'psx' && y.feed.symbol.toUpperCase() === x.feed.symbol) ||
+        (x.feed.type === 'mufap' && y.feed?.type === 'mufap' && y.feed.fund.toLowerCase() === x.feed.fund.toLowerCase()) || y.name.toLowerCase() === x.name.toLowerCase());
+      if (!h) {
+        h = { id: uid(), name: x.name, cls: x.cls, symbol: x.symbol, mode: CLASSES[x.cls].mode, unit: CLASSES[x.cls].unit, notes: 'From the PSX & MUFAP dashboard', feed: x.feed };
+        state.holdings.push(h); newH++;
+      } else if (!h.feed) h.feed = x.feed;
+      ids[x.name] = h.id;
+    }
+    for (const t of got.txns) {
+      const rec = { hid: ids[t.holding], date: t.date, type: t.type, amount: t.amount, units: t.units, note: t.note };
+      if (state.txns.some(y => y.hid === rec.hid && y.date === rec.date && y.type === rec.type && Math.abs(+y.amount - rec.amount) < 0.01 && (y.units ?? null) === (rec.units ?? null))) { skipped++; continue; }
+      state.txns.push({ id: uid(), ...rec }); added++;
+    }
+    await save(); renderAll();
+    toast(`From the PSX dashboard: ${added} transactions` + (newH ? `, ${newH} new holdings` : '') + (skipped ? `, ${skipped} already here` : '') +
+      (got.cash ? ` (${got.cash} broker cash entries not imported)` : ''));
   }
 
   // ---------- CSV import ----------

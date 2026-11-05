@@ -54,3 +54,18 @@ const doc = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'psx_sam
   assert.strictEqual(FD.navOn(M, 'Meezan Islamic Fund', '2026-11-20'), null);                // more than 10 days on
 }
 console.log('navOn ok');
+
+// From the PSX & MUFAP dashboard's ledger: buys with charges, sales net, funds, dividends; cash counted only
+{
+  const r = FD.fromPsxLedger({ brokers: {}, entries: [
+    { type: 'cash', date: '2026-07-01', amount: 100000 },
+    { type: 'buy', date: '2026-07-02', symbol: 'mebl', qty: 100, price: 300, commission: 45, taxes: 6.75, other: 1, broker: 'Finqalab' },
+    { type: 'sell', date: '2026-08-02', symbol: 'MEBL', qty: 40, price: 350, commission: 21, taxes: 3.15, other: 0 },
+    { type: 'fund_buy', date: '2026-07-22', fund: 'Meezan Islamic Fund', amount: 50000, nav: 95.2, units: 525.2101 },
+    { type: 'dividend', date: '2026-09-01', symbol: 'MEBL', net: 1200 }] });
+  assert.deepStrictEqual(r.holdings.map(h => [h.name, h.cls, h.feed.type]), [['MEBL', 'psx', 'psx'], ['Meezan Islamic Fund', 'mf', 'mufap']]);
+  assert.deepStrictEqual(r.txns.map(t => [t.type, t.amount, t.units]), [['BUY', 30052.75, 100], ['SELL', 13975.85, 40], ['BUY', 50000, 525.2101], ['INCOME', 1200, null]]);
+  assert.strictEqual(r.cash, 1);
+}
+console.log('fromPsxLedger ok');
+
