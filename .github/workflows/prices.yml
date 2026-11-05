@@ -39,5 +39,13 @@ jobs:
           if [ -f data/psx.enc.json ]; then git add data/psx.enc.json; fi
           if git diff --cached --quiet; then echo "no changes"; exit 0; fi
           git commit -m "prices: $(date -u +%Y-%m-%dT%H:%MZ)"
-          for i in 1 2 3; do git pull --rebase --autostash -q origin main && git push && exit 0; sleep 5; done
+          for i in 1 2 3; do
+            if git pull --rebase -q origin main; then git push && exit 0
+            else
+              # another run committed prices a moment ago (same files): theirs are as fresh as ours
+              git rebase --abort || true
+              echo "prices were just committed by another run; keeping those"; exit 0
+            fi
+            sleep 5
+          done
           exit 1
