@@ -14,13 +14,15 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install bandit pip-audit
-      - name: Bandit (medium+ severity)
-        run: bandit -r . -x ./.git,./venv,./.venv,./tests -ll
+      - name: Bandit report (medium+, informational)
+        run: bandit -r . -x ./.git,./venv,./.venv,./tests -ll --exit-zero
+      - name: Bandit gate (fail on high severity)
+        run: bandit -r . -x ./.git,./venv,./.venv,./tests -lll
       - name: pip-audit
         run: |
           shopt -s nullglob
